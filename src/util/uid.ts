@@ -4,87 +4,71 @@ import { Diagnostics } from "../classes/diagnostics";
 import { TransformState } from "../classes/transformState";
 import { f } from "./factory";
 import { getDeclarationName } from "./functions/getDeclarationName";
-import { getPackageJson } from "./functions/getPackageJson";
+import { getPackageJson, PackageJsonResult } from "./functions/getPackageJson";
 import { isDefinedType } from "./functions/isDefinedType";
-import { isPathDescendantOfAny } from "./functions/isPathDescendantOf";
+import { isPathDescendantOf, isPathDescendantOfAny } from "./functions/isPathDescendantOf";
 
-/**
- * Format the internal id to be shorter, remove `out` part of path, and use hashPrefix.
+/*
+ * Ids are stateless and deterministic: the same declaration always gets the same id, whichever project compiles it.
+ * There is no build-info file and no random salt (unlike rbxts-transformer-flamework).
+ *
+ * - A declaration in the project being compiled: `<module>@<name>`, where `<module>` is its output module path
+ *   relative to `outDir` (no extension, `index` -> `init`). Packages (roblox-ts `--type package`, or a scoped package
+ *   name) prefix it with their package name: `<package>:<module>@<name>`.
+ * - A declaration in another package (its `.d.ts` files): `<package>:<module>@<name>`, where `<module>` is relative
+ *   to the directory of the package's `types`/`typings` entry (its outDir for roblox-ts packages).
+ *
+ * So `export class Foo` in `@typetorch/framework`'s `src/net/index.ts` is `@typetorch/framework:net/init@Foo` both
+ * while the framework compiles and when a game sees `node_modules/@typetorch/framework/out/net/index.d.ts`.
+ *
+ * `<name>` includes named ancestors (namespaces): `Outer.Inner`.
  */
-function formatInternalid(state: TransformState, internalId: string, hashPrefix = state.config.hashPrefix) {
-	const match = new RegExp(`^.*:(.*)@(.+)$`).exec(internalId);
-	if (!match) return internalId;
 
-	const [, path, name] = match;
-	const revisedPath = path.replace(/^(.*?)[\/\\]/, "");
-	return hashPrefix ? `${hashPrefix}:${revisedPath}@${name}` : `${revisedPath}@${name}`;
+const INDEX_REGEX = /(^|[\/\\])index$/;
+
+function toModulePath(relativePath: string) {
+	return relativePath.replace(/\\/g, "/").replace(INDEX_REGEX, "$1init");
+}
+
+/** The directory a package's declaration files are rooted at (its outDir, for roblox-ts packages). */
+function getDeclarationRoot(pkg: PackageJsonResult): string | undefined {
+	const typesEntry = pkg.result.types ?? pkg.result.typings;
+	if (typeof typesEntry !== "string") return;
+
+	const typesDirectory = path.dirname(path.join(pkg.directory, typesEntry));
+	if (typesDirectory === pkg.directory) return;
+
+	return typesDirectory;
 }
 
 /**
- * Gets the short ID for a node and includes the hash for uniqueness.
+ * The module path of a file inside a package that isn't the one being compiled.
  */
-function getShortId(state: TransformState, node: ts.Declaration, hashPrefix = state.config.hashPrefix) {
-	const hash = state.hash(state.buildInfo.getLatestId(), true);
-	const fullName = getDeclarationName(node);
-	const fileName = path.parse(node.getSourceFile().fileName).name;
-	const luaFileName = fileName === "index" ? "init" : fileName;
-	const isShort = state.config.idGenerationMode === "short";
-	const shortId = `${isShort ? luaFileName + "@" : ""}${fullName}{${hash}}`;
-	return hashPrefix ? `${state.config.hashPrefix}:${shortId}` : shortId;
-}
-
-export function getInternalId(state: TransformState, node: ts.NamedDeclaration) {
-	const filePath = state.getSourceFile(node).fileName;
-	const fullName = getDeclarationName(node);
-	const { directory, result } = getPackageJson(path.dirname(filePath));
-
-	if (isPathDescendantOfAny(filePath, state.rootDirs)) {
-		const outputPath = state.pathTranslator.getOutputPath(filePath).replace(/(\.lua|\.d\.ts)$/, "");
-		const relativePath = path.relative(state.currentDirectory, outputPath);
-		const internalId = `${result.name}:${relativePath.replace(/\\/g, "/")}@${fullName}`;
-		return {
-			isPackage: false,
-			internalId,
-		};
+function getForeignModulePath(pkg: PackageJsonResult, filePath: string) {
+	const stripped = filePath.replace(/(\.d)?\.tsx?$/, "");
+	const declarationRoot = getDeclarationRoot(pkg);
+	if (declarationRoot !== undefined && isPathDescendantOf(stripped, declarationRoot)) {
+		return toModulePath(path.relative(declarationRoot, stripped));
 	}
 
-	const relativePath = path.relative(directory, filePath.replace(/(\.d)?.ts$/, "").replace(/index$/, "init"));
-	const internalId = `${result.name}:${relativePath.replace(/\\/g, "/")}@${fullName}`;
-	return {
-		isPackage: true,
-		internalId,
-	};
+	// No usable `types` entry: assume the first directory is the outDir (rbxts-transformer-flamework's convention).
+	return toModulePath(path.relative(pkg.directory, stripped)).replace(/^(.*?)\//, "");
 }
 
 export function getDeclarationUid(state: TransformState, node: ts.NamedDeclaration) {
-	const { isPackage, internalId } = getInternalId(state, node);
-	const id = state.buildInfo.getIdentifierFromInternal(internalId);
-	if (id) return id;
+	const filePath = state.getSourceFile(node).fileName;
+	const fullName = getDeclarationName(node);
 
-	// this is a package, and the package itself did not generate an id
-	// use the internal ID to prevent breakage between packages and games.
-	if (isPackage) {
-		const buildInfo = state.buildInfo.getBuildInfoFromFile(state.getSourceFile(node).fileName);
-		if (buildInfo) {
-			const prefix = buildInfo.getIdentifierPrefix();
-			if (prefix) {
-				return formatInternalid(state, internalId, prefix);
-			}
-		}
-		return internalId;
+	if (isPathDescendantOfAny(filePath, state.rootDirs)) {
+		const outputPath = state.pathTranslator.getOutputPath(filePath).replace(/(\.lua|\.d\.ts)$/, "");
+		const modulePath = toModulePath(path.relative(state.outDir, outputPath));
+		const prefix = state.idPrefix;
+		return prefix !== undefined ? `${prefix}:${modulePath}@${fullName}` : `${modulePath}@${fullName}`;
 	}
 
-	let newId: string;
-	if (state.config.idGenerationMode === "obfuscated") {
-		newId = state.hash(state.buildInfo.getLatestId());
-	} else if (state.config.idGenerationMode === "short" || state.config.idGenerationMode === "tiny") {
-		newId = getShortId(state, node);
-	} else {
-		newId = formatInternalid(state, internalId);
-	}
-
-	state.buildInfo.addIdentifier(internalId, newId);
-	return newId;
+	const pkg = getPackageJson(path.dirname(filePath));
+	const packageName = pkg.result.name ?? path.basename(pkg.directory);
+	return `${packageName}:${getForeignModulePath(pkg, filePath)}@${fullName}`;
 }
 
 export function getSymbolUid(state: TransformState, symbol: ts.Symbol, trace: ts.Node): string;

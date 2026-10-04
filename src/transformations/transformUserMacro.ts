@@ -5,28 +5,27 @@ import { TransformState } from "../classes/transformState";
 import { f } from "../util/factory";
 import { buildGuardFromTypeWithDedup } from "../util/functions/buildGuardFromType";
 import { getTypeUid } from "../util/uid";
-import { NodeMetadata } from "../classes/nodeMetadata";
-import { buildPathGlobIntrinsic, buildPathIntrinsic } from "./macros/intrinsics/paths";
-import { validateParameterConstIntrinsic } from "./macros/intrinsics/parameters";
-import {
-	buildDeclarationUidIntrinsic,
-	transformNetworkingMiddlewareIntrinsic,
-	transformObfuscatedObjectIntrinsic,
-	transformShuffleArrayIntrinsic,
-} from "./macros/intrinsics/networking";
-import { buildTupleGuardsIntrinsic } from "./macros/intrinsics/guards";
 import { isTupleType } from "../util/functions/isTupleType";
-import { inlineMacroIntrinsic } from "./macros/intrinsics/inlining";
-import { buildSymbolIdIntrinsic } from "./macros/intrinsics/symbol";
 
+/**
+ * Property names that mark TypeTorch's macro types (see `Modding` in the runtime kit). They only exist in the type
+ * system: a parameter typed `Modding.Generic<T, "guard">` has a `_typetorch_macro_generic: [T, "guard"]` property.
+ */
+export const MACRO_MARKERS = {
+	generic: "_typetorch_macro_generic",
+	many: "_typetorch_macro_many",
+	caller: "_typetorch_macro_caller",
+	tupleLabels: "_typetorch_macro_tuple_labels",
+} as const;
+
+/**
+ * Fills in the omitted macro parameters of a call to a function declared with `@metadata macro`.
+ */
 export function transformUserMacro(
 	state: TransformState,
 	node: ts.NewExpression | ts.CallExpression,
 	signature: ts.Signature,
 ): ts.Expression | undefined {
-	const file = state.getSourceFile(node);
-	const signatureDeclaration = signature.getDeclaration();
-	const nodeMetadata = new NodeMetadata(state, signatureDeclaration);
 	const args = node.arguments ? [...node.arguments] : [];
 	const parameters = new Map<number, UserMacro>();
 
@@ -54,33 +53,7 @@ export function transformUserMacro(
 		}
 	}
 
-	const networkingMiddleware = nodeMetadata.getSymbol("intrinsic-middleware");
-	if (networkingMiddleware) {
-		transformNetworkingMiddlewareIntrinsic(state, signature, args, networkingMiddleware);
-	}
-
-	const inlineIntrinsic = nodeMetadata.getSymbol("intrinsic-inline");
-	if (inlineIntrinsic && inlineIntrinsic.length === 1) {
-		return inlineMacroIntrinsic(signature, args, inlineIntrinsic[0]);
-	}
-
-	validateParameterConstIntrinsic(node, signature, nodeMetadata.getSymbol("intrinsic-const") ?? []);
-
-	let name: ts.Expression | undefined;
-
-	const rewrite = nodeMetadata.getSymbol("intrinsic-flamework-rewrite")?.[0];
-	if (rewrite && rewrite.parent) {
-		const namespace = state.addFileImport(file, "@flamework/core", rewrite.parent.name);
-		name = f.elementAccessExpression(namespace, rewrite.name);
-	}
-
-	if (!name) {
-		name = state.transformNode(node.expression);
-	}
-
-	if (nodeMetadata.isRequested("intrinsic-arg-shift")) {
-		args.shift();
-	}
+	const name = state.transformNode(node.expression);
 
 	if (ts.isNewExpression(node)) {
 		return ts.factory.updateNewExpression(node, name, node.typeArguments, args);
@@ -166,8 +139,6 @@ function buildUserMacro(state: TransformState, node: ts.Expression, macro: UserM
 				? f.bool(value)
 				: f.nil(),
 		);
-	} else if (macro.kind === "intrinsic") {
-		return f.asNever(buildIntrinsicMacro(state, node, macro));
 	}
 
 	return f.asNever(f.nil());
@@ -214,82 +185,6 @@ function buildUserMacro(state: TransformState, node: ts.Expression, macro: UserM
 	}
 }
 
-function buildIntrinsicMacro(state: TransformState, node: ts.Expression, macro: UserMacro & { kind: "intrinsic" }) {
-	if (macro.id === "pathglob") {
-		const [pathType] = macro.inputs;
-		if (!pathType) {
-			throw new Error(`Invalid intrinsic usage`);
-		}
-
-		return buildPathGlobIntrinsic(state, node, pathType);
-	}
-
-	if (macro.id === "path") {
-		const [pathType] = macro.inputs;
-		if (!pathType) {
-			throw new Error(`Invalid intrinsic usage`);
-		}
-
-		return buildPathIntrinsic(state, node, pathType);
-	}
-
-	if (macro.id === "obfuscate-obj") {
-		const [macroType, hashType] = macro.inputs;
-		if (!macroType || !hashType) {
-			throw new Error(`Invalid intrinsic usage`);
-		}
-
-		const innerMacro = getUserMacroOfMany(state, node, macroType);
-		if (!innerMacro) {
-			throw new Error(`Intrinsic obfuscate-obj received no inner macro.`);
-		}
-
-		transformObfuscatedObjectIntrinsic(state, innerMacro, hashType);
-
-		return buildUserMacro(state, node, innerMacro);
-	}
-
-	if (macro.id === "shuffle-array") {
-		const [macroType] = macro.inputs;
-		if (!macroType) {
-			throw new Error(`Invalid intrinsic usage`);
-		}
-
-		const innerMacro = getUserMacroOfMany(state, node, macroType);
-		if (!innerMacro) {
-			throw new Error(`Intrinsic obfuscate-obj received no inner macro.`);
-		}
-
-		transformShuffleArrayIntrinsic(state, innerMacro);
-
-		return buildUserMacro(state, node, innerMacro);
-	}
-
-	if (macro.id === "tuple-guards") {
-		const [tupleType] = macro.inputs;
-		if (!tupleType) {
-			throw new Error(`Invalid intrinsic usage`);
-		}
-
-		return buildTupleGuardsIntrinsic(state, node, tupleType);
-	}
-
-	if (macro.id === "declaration-uid") {
-		return buildDeclarationUidIntrinsic(state, node);
-	}
-
-	if (macro.id === "symbol-id") {
-		const [type] = macro.inputs;
-		if (!type || !f.is.call(node)) {
-			throw new Error(`Invalid intrinsic usage`);
-		}
-
-		return buildSymbolIdIntrinsic(state, node, type);
-	}
-
-	throw `Unexpected intrinsic ID '${macro.id}' with ${macro.inputs.length} inputs`;
-}
-
 function getMetadataFromType(metadataType: ts.Type) {
 	if (metadataType.isStringLiteral()) {
 		return metadataType.value;
@@ -302,7 +197,7 @@ function getUserMacroOfMany(state: TransformState, node: ts.Expression, target: 
 		return basicUserMacro;
 	}
 
-	const manyMetadata = state.typeChecker.getTypeOfPropertyOfType(target, "_flamework_macro_many");
+	const manyMetadata = state.typeChecker.getTypeOfPropertyOfType(target, MACRO_MARKERS.many);
 	if (manyMetadata) {
 		return getUserMacroOfMany(state, node, manyMetadata);
 	}
@@ -380,7 +275,7 @@ function getUserMacroOfMany(state: TransformState, node: ts.Expression, target: 
 }
 
 function getBasicUserMacro(state: TransformState, node: ts.Expression, target: ts.Type): UserMacro | undefined {
-	const genericMetadata = state.typeChecker.getTypeOfPropertyOfType(target, "_flamework_macro_generic");
+	const genericMetadata = state.typeChecker.getTypeOfPropertyOfType(target, MACRO_MARKERS.generic);
 	if (genericMetadata) {
 		const targetType = state.typeChecker.getTypeOfPropertyOfType(genericMetadata, "0");
 		const metadataType = state.typeChecker.getTypeOfPropertyOfType(genericMetadata, "1");
@@ -391,7 +286,7 @@ function getBasicUserMacro(state: TransformState, node: ts.Expression, target: t
 		if (!metadata) {
 			Diagnostics.error(
 				node,
-				`Flamework encountered invalid metadata: '${state.typeChecker.typeToString(metadataType)}'`,
+				`@typetorch/transformer encountered invalid metadata: '${state.typeChecker.typeToString(metadataType)}'`,
 			);
 		}
 
@@ -402,7 +297,7 @@ function getBasicUserMacro(state: TransformState, node: ts.Expression, target: t
 		};
 	}
 
-	const callerMetadata = state.typeChecker.getTypeOfPropertyOfType(target, "_flamework_macro_caller");
+	const callerMetadata = state.typeChecker.getTypeOfPropertyOfType(target, MACRO_MARKERS.caller);
 	if (callerMetadata) {
 		const metadata = getMetadataFromType(callerMetadata);
 		if (!metadata) return;
@@ -413,46 +308,15 @@ function getBasicUserMacro(state: TransformState, node: ts.Expression, target: t
 		};
 	}
 
-	const hashMetadata = state.typeChecker.getTypeOfPropertyOfType(target, "_flamework_macro_hash");
-	if (hashMetadata) {
-		const text = state.typeChecker.getTypeOfPropertyOfType(hashMetadata, "0");
-		const context = state.typeChecker.getTypeOfPropertyOfType(hashMetadata, "1");
-		const isObfuscation = state.typeChecker.getTypeOfPropertyOfType(hashMetadata, "2");
-		if (!text || !text.isStringLiteral()) return;
-		if (!context) return;
-
-		const contextName = context.isStringLiteral() ? context.value : "@";
-		return {
-			kind: "literal",
-			value: isObfuscation
-				? state.obfuscateText(text.value, contextName)
-				: state.buildInfo.hashString(text.value, contextName),
-		};
-	}
-
 	const nonNullableTarget = target.getNonNullableType();
-	const labelMetadata = state.typeChecker.getTypeOfPropertyOfType(nonNullableTarget, "_flamework_macro_tuple_labels");
+	const labelMetadata = state.typeChecker.getTypeOfPropertyOfType(nonNullableTarget, MACRO_MARKERS.tupleLabels);
 	if (labelMetadata) {
 		return getLabels(state, labelMetadata);
-	}
-
-	const intrinsicMetadata = state.typeChecker.getTypeOfPropertyOfType(nonNullableTarget, "_flamework_intrinsic");
-	if (intrinsicMetadata) {
-		if (isTupleType(state, intrinsicMetadata) && intrinsicMetadata.typeArguments) {
-			const [id, ...inputs] = intrinsicMetadata.typeArguments;
-			if (!id || !id.isStringLiteral()) return;
-
-			return {
-				kind: "intrinsic",
-				id: id.value,
-				inputs,
-			};
-		}
 	}
 }
 
 function getUserMacroOfType(state: TransformState, node: ts.Expression, target: ts.Type): UserMacro | undefined {
-	const manyMetadata = state.typeChecker.getTypeOfPropertyOfType(target, "_flamework_macro_many");
+	const manyMetadata = state.typeChecker.getTypeOfPropertyOfType(target, MACRO_MARKERS.many);
 	if (manyMetadata) {
 		return getUserMacroOfMany(state, node, manyMetadata);
 	} else {
@@ -461,8 +325,8 @@ function getUserMacroOfType(state: TransformState, node: ts.Expression, target: 
 }
 
 /**
- * This allows user macros to specify signatures that can accept non-metadata, like in Flamework components.
- * Multiple modding types in a single parameter aren't supported, and Flamework will choose a random one.
+ * This allows user macros to specify signatures that can accept non-metadata.
+ * Multiple modding types in a single parameter aren't supported, and the first one is chosen.
  *
  * For example, `string | Modding.Generic<T, "id">`, will generate the ID for `T`, but also allow users to pass in one manually.
  */
@@ -511,9 +375,4 @@ export type UserMacro =
 	| {
 			kind: "literal";
 			value: string | number | boolean | undefined;
-	  }
-	| {
-			kind: "intrinsic";
-			id: string;
-			inputs: ts.Type[];
 	  };

@@ -1,16 +1,29 @@
 import ts from "typescript";
 import path from "path";
-import normalize from "normalize-package-data";
 import { isPathDescendantOf } from "./isPathDescendantOf";
 import { Cache } from "../cache";
 
-export type PackageJsonResult = ReturnType<typeof getPackageJsonInner>;
+export interface PackageJson {
+	name?: string;
+	version?: string;
+	main?: string;
+	types?: string;
+	typings?: string;
+}
+
+export interface PackageJsonResult {
+	/** The directory containing the package.json */
+	directory: string;
+	/** The path to the package.json */
+	path: string;
+	result: PackageJson;
+}
 
 /**
  * Looks recursively at ancestors until a package.json is found
  * @param directory The directory to start under.
  */
-export function getPackageJson(directory: string) {
+export function getPackageJson(directory: string): PackageJsonResult {
 	const existing = Cache.pkgJsonCache.get(path.normalize(directory));
 	if (existing) return existing;
 
@@ -28,17 +41,16 @@ export function getPackageJson(directory: string) {
 	return result;
 }
 
-function getPackageJsonInner(directory: string) {
+function getPackageJsonInner(directory: string): PackageJsonResult {
 	const packageJsonPath = ts.findPackageJson(directory, ts.sys as never);
 	if (!packageJsonPath) throw new Error(`package.json not found in ${directory}`);
 
-	const text = packageJsonPath ? ts.sys.readFile(packageJsonPath) : undefined;
+	const text = ts.sys.readFile(packageJsonPath);
 	const packageJson = text ? JSON.parse(text) : {};
-	normalize(packageJson);
 
 	return {
 		directory: path.dirname(packageJsonPath),
 		path: packageJsonPath,
-		result: packageJson as normalize.Package,
+		result: packageJson as PackageJson,
 	};
 }

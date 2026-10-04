@@ -1,16 +1,10 @@
-import chalk from "chalk";
 import path from "path";
 import ts from "typescript";
-import { Logger } from "../../classes/logger";
+import { green, Logger } from "../../classes/logger";
 import { TransformState } from "../../classes/transformState";
 import { getPackageJson } from "./getPackageJson";
 import { isPathDescendantOf } from "./isPathDescendantOf";
-
-function tryResolve(name: string, path: string) {
-	try {
-		return require.resolve(name, { paths: [path] });
-	} catch (e) {}
-}
+import { tryResolve } from "./tryResolve";
 
 function emitMessages(messages: string[]): never {
 	Logger.writeLine(...messages);
@@ -29,7 +23,7 @@ export function emitTypescriptMismatch(state: TransformState, baseMessage: strin
 	if (!robloxTsPath) {
 		messages.push(
 			"It is recommended that you use a local install of roblox-ts.",
-			`You can install a local version using ${chalk.green("npm install -D roblox-ts")}`,
+			`You can install a local version using ${green("bun add -d roblox-ts")}`,
 		);
 		emitMessages(messages);
 	}
@@ -39,7 +33,7 @@ export function emitTypescriptMismatch(state: TransformState, baseMessage: strin
 		if (!isPathDescendantOf(require.main.filename, path.join(state.rootDirectory, "node_modules"))) {
 			messages.push(
 				"It appears you've run the transformer using a global install.",
-				`You can run using the locally installed version using ${chalk.green("npx rbxtsc")}`,
+				`You can run using the locally installed version using ${green("bunx rbxtsc")}`,
 			);
 			emitMessages(messages);
 		}
@@ -49,18 +43,14 @@ export function emitTypescriptMismatch(state: TransformState, baseMessage: strin
 	// but they're using the wrong TypeScript version.
 	const robloxTsTypeScript = tryResolve("typescript", robloxTsPath);
 	if (robloxTsTypeScript) {
-		const typescriptPackage = getPackageJson(robloxTsTypeScript);
-		if (typescriptPackage) {
-			const requiredVersion = typescriptPackage.result.version;
-			if (ts.version !== requiredVersion) {
-				messages.push(
-					`Flamework is using TypeScript version ${ts.version}`,
-					`roblox-ts requires TypeScript version ${requiredVersion}`,
-					`You can fix this by setting your TypeScript version: ${chalk.green(
-						`npm install -D typescript@=${requiredVersion}`,
-					)}`,
-				);
-			}
+		const typescriptPackage = getPackageJson(path.dirname(robloxTsTypeScript));
+		const requiredVersion = typescriptPackage.result.version;
+		if (requiredVersion && ts.version !== requiredVersion) {
+			messages.push(
+				`@typetorch/transformer is using TypeScript version ${ts.version}`,
+				`roblox-ts requires TypeScript version ${requiredVersion}`,
+				`You can fix this by setting your TypeScript version: ${green(`bun add -d typescript@${requiredVersion}`)}`,
+			);
 		}
 	}
 

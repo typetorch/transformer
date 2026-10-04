@@ -1,0 +1,32 @@
+{
+	"compilerOptions": {
+		// required
+		"allowSyntheticDefaultImports": true,
+		"downlevelIteration": true,
+		"module": "commonjs",
+		"moduleResolution": "Node",
+		"noLib": true,
+		"resolveJsonModule": true,
+		"experimentalDecorators": true,
+		"forceConsistentCasingInFileNames": true,
+		"moduleDetection": "force",
+		"strict": true,
+		"target": "ESNext",
+		"typeRoots": ["node_modules/@rbxts", "node_modules/@typetorch"],
+		// configurable
+		"rootDir": "src",
+		"outDir": "out",
+		"incremental": true,
+		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
+		// Same as tsconfig.json, but loads the transformer straight from ../out, where `typescript` resolves to the
+		// transformer's own copy: exercises the require hook that redirects it to roblox-ts' TypeScript.
+		"plugins": [
+			{
+				"transform": "rbxts-transform-debug",
+				"environmentRequires": {}
+			},
+			{ "transform": "../out/index.js" }
+		]
+	},
+	"include": ["./src/**/*.ts"]
+}

@@ -1,0 +1,11 @@
+node_modules/
+out/
+*.tsbuildinfo
+.env
+CHANGELOG.md
+
+# test-project build output
+test-project/include/
+test-project/*.rbxm
+test-project/framework-standin/src/reflection/
+test-project/.pack/

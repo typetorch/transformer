@@ -1,0 +1,27 @@
+{
+	"compilerOptions": {
+		// required
+		"allowSyntheticDefaultImports": true,
+		"downlevelIteration": true,
+		"module": "commonjs",
+		"moduleResolution": "Node",
+		"noLib": true,
+		"resolveJsonModule": true,
+		"experimentalDecorators": true,
+		"forceConsistentCasingInFileNames": true,
+		"moduleDetection": "force",
+		"strict": true,
+		"target": "ESNext",
+		"typeRoots": ["node_modules/@rbxts"],
+		// package
+		"declaration": true,
+		"rootDir": "src",
+		"outDir": "out",
+		"incremental": true,
+		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
+		// The stand-in compiles itself with the transformer too: its own decorated class gets an identifier, and the
+		// generated Reflect import must point at src/reflection/reflect (a package can't import itself by name).
+		"plugins": [{ "transform": "@typetorch/transformer" }]
+	},
+	"include": ["./src/**/*.ts"]
+}

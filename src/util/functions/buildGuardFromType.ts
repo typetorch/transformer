@@ -315,7 +315,7 @@ export function createGuardGenerator(state: TransformState, file: ts.SourceFile,
 		}
 
 		if (type.flags & ts.TypeFlags.TemplateLiteral) {
-			fail(`Flamework encountered a template literal which is unsupported: ${type.checker.typeToString(type)}`);
+			fail(`The guard generator encountered a template literal which is unsupported: ${type.checker.typeToString(type)}`);
 		}
 
 		const symbol = type.getSymbol();
@@ -364,7 +364,7 @@ export function createGuardGenerator(state: TransformState, file: ts.SourceFile,
 
 		if (type.isClass()) {
 			fail(
-				`Class "${type.symbol.name}" was encountered. Flamework does not support generating guards for classes.`,
+				`Class "${type.symbol.name}" was encountered. Guards cannot be generated for classes.`,
 			);
 		}
 
@@ -384,7 +384,7 @@ export function createGuardGenerator(state: TransformState, file: ts.SourceFile,
 			const indexInfo = indexInfos[0];
 			if (indexInfo) {
 				if (indexInfos.length > 1) {
-					fail("Flamework cannot generate types with multiple index signatures.");
+					fail("Guards cannot be generated for types with multiple index signatures.");
 				}
 
 				guards.push(f.call(f.field(tId, "map"), [buildGuard(indexInfo.keyType), buildGuard(indexInfo.type)]));
@@ -421,7 +421,7 @@ export function createGuardGenerator(state: TransformState, file: ts.SourceFile,
 
 	function buildIntersectionGuard(type: ts.IntersectionType) {
 		if (type.checker.getIndexInfosOfType(type).length > 1) {
-			fail("Flamework cannot generate intersections with multiple index signatures.");
+			fail("Guards cannot be generated for intersections with multiple index signatures.");
 		}
 
 		// We find any disjoint types (strings, numbers, etc) as intersections with them are invalid.

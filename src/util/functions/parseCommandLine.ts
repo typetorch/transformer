@@ -2,9 +2,11 @@ import ts from "typescript";
 import path from "path";
 import fs from "fs";
 
-interface CommandLine {
+export interface CommandLine {
 	tsconfigPath: string;
 	project: string;
+	/** The roblox-ts `--type` option, if it was passed. */
+	type?: string;
 }
 
 function findTsConfigPath(projectPath: string) {
@@ -18,16 +20,23 @@ function findTsConfigPath(projectPath: string) {
 	return path.resolve(process.cwd(), tsConfigPath);
 }
 
-export function parseCommandLine(): CommandLine {
-	const options = {} as CommandLine;
-
-	const projectIndex = process.argv.findIndex((x) => x === "-p" || x === "--project");
-	if (projectIndex !== -1) {
-		options.tsconfigPath = findTsConfigPath(process.argv[projectIndex + 1]);
-	} else {
-		options.tsconfigPath = findTsConfigPath(".");
+function getOption(names: string[]): string | undefined {
+	for (let i = 0; i < process.argv.length; i++) {
+		const arg = process.argv[i];
+		for (const name of names) {
+			if (arg === name) return process.argv[i + 1];
+			if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1);
+		}
 	}
+}
 
-	options.project = path.dirname(options.tsconfigPath);
-	return options;
+export function parseCommandLine(): CommandLine {
+	const project = getOption(["-p", "--project"]);
+	const tsconfigPath = findTsConfigPath(project ?? ".");
+
+	return {
+		tsconfigPath,
+		project: path.dirname(tsconfigPath),
+		type: getOption(["--type"]),
+	};
 }

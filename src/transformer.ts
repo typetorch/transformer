@@ -4,11 +4,10 @@ import path from "path";
 import { transformFile } from "./transformations/transformFile";
 import { TransformerConfig, TransformState } from "./classes/transformState";
 import { Logger } from "./classes/logger";
-import { viewFile } from "./information/viewFile";
 import { f } from "./util/factory";
-import chalk from "chalk";
-import { PKG_VERSION } from "./classes/pathTranslator/constants";
 import { emitTypescriptMismatch } from "./util/functions/emitTypescriptMismatch";
+
+export type { TransformerConfig };
 
 export default function (program: ts.Program, config?: TransformerConfig) {
 	return (context: ts.TransformationContext): ((file: ts.SourceFile) => ts.Node) => {
@@ -16,23 +15,10 @@ export default function (program: ts.Program, config?: TransformerConfig) {
 		f.setFactory(context.factory);
 
 		const state = new TransformState(program, context, config ?? {});
-		let hasCollectedInformation = false;
 
-		const projectFlameworkVersion = state.buildInfo.getFlameworkVersion();
-		if (projectFlameworkVersion !== PKG_VERSION) {
-			Logger.writeLine(
-				`${chalk.red("Project was compiled on different version of Flamework.")}`,
-				`Please recompile by deleting the ${path.relative(state.currentDirectory, state.outDir)} directory`,
-				`Current Flamework Version: ${chalk.yellow(PKG_VERSION)}`,
-				`Previous Flamework Version: ${chalk.yellow(projectFlameworkVersion)}`,
-			);
-			process.exit(1);
-		}
-
-		setTimeout(() => state.saveArtifacts());
 		return (file: ts.SourceFile) => {
 			if (!ts.isSourceFile(file)) {
-				emitTypescriptMismatch(state, chalk.red("Failed to load! TS version mismatch detected"));
+				emitTypescriptMismatch(state, "Failed to load! TS version mismatch detected");
 			}
 
 			if (state.config.noSemanticDiagnostics !== true) {
@@ -51,18 +37,7 @@ export default function (program: ts.Program, config?: TransformerConfig) {
 				}
 			}
 
-			if (!hasCollectedInformation) {
-				hasCollectedInformation = true;
-
-				program.getSourceFiles().forEach((file) => {
-					if (file.isDeclarationFile && !state.shouldViewFile(file)) return;
-
-					viewFile(state, file);
-				});
-			}
-
-			const result = transformFile(state, file);
-			return result;
+			return transformFile(state, file);
 		};
 	};
 }

@@ -6,22 +6,44 @@ import { TransformState } from "../../classes/transformState";
 import { f } from "../../util/factory";
 import { buildGuardFromType } from "../../util/functions/buildGuardFromType";
 import { getNodeUid, getSymbolUid, getTypeUid } from "../../util/uid";
-import { updateComponentConfig } from "../macros/updateComponentConfig";
-import type { ClassInfo } from "../../types/classes";
+
+/**
+ * The property that marks a decorator made with `Modding.createDecorator` / `createMetaDecorator` (runtime kit).
+ */
+export const DECORATOR_MARKER = "_typetorch_decorator";
+
+/**
+ * Reflect metadata keys. A class (or member) asks for them with JSDoc on itself, on a decorator's declaration, or on
+ * an interface it implements: `@metadata typetorch:parameters injectable`.
+ */
+export const MetadataKeys = {
+	/** Always written for classes with a TypeTorch decorator; registers the class in `Reflect.idToObj`. */
+	identifier: "identifier",
+	parameters: "typetorch:parameters",
+	parameterNames: "typetorch:parameter_names",
+	parameterGuards: "typetorch:parameter_guards",
+	implements: "typetorch:implements",
+	type: "typetorch:type",
+	guard: "typetorch:guard",
+	returnType: "typetorch:return_type",
+	returnGuard: "typetorch:return_guard",
+} as const;
 
 export function transformClassDeclaration(state: TransformState, node: ts.ClassDeclaration) {
 	const symbol = state.getSymbol(node);
 	if (!symbol || !node.name) return state.transform(node);
 
-	const classInfo = state.classes.get(symbol);
-	if (!classInfo) return state.transform(node);
+	const metadata = new NodeMetadata(state, node);
+	const hasDecorators = hasTypeTorchDecorators(state, node);
+	if (!hasDecorators && !metadata.isRequested("reflect")) return state.transform(node);
 
-	const importIdentifier = state.addFileImport(state.getSourceFile(node), "@flamework/core", "Reflect");
+	const importIdentifier = state.getReflect(state.getSourceFile(node));
 	const reflectStatements = new Array<ts.Statement>();
 	const decoratorStatements = new Array<ts.Statement>();
-	const metadata = new NodeMetadata(state, node);
 
-	reflectStatements.push(...convertReflectionToStatements(generateClassMetadata(state, classInfo, metadata, node)));
+	reflectStatements.push(
+		...convertReflectionToStatements(generateClassMetadata(state, hasDecorators, metadata, node)),
+	);
 	decoratorStatements.push(...getDecoratorStatements(state, node, node, metadata));
 
 	for (const member of node.members) {
@@ -60,19 +82,19 @@ function generateFieldMetadata(state: TransformState, metadata: NodeMetadata, fi
 	const fields = new Array<[string, f.ConvertableExpression]>();
 	const type = state.typeChecker.getTypeAtLocation(field);
 
-	if (metadata.isRequested("flamework:type")) {
+	if (metadata.isRequested(MetadataKeys.type)) {
 		if (!field.type) {
 			const id = getTypeUid(state, type, field.name ?? field);
-			fields.push(["flamework:type", id]);
+			fields.push([MetadataKeys.type, id]);
 		} else {
 			const id = getNodeUid(state, field.type);
-			fields.push(["flamework:type", id]);
+			fields.push([MetadataKeys.type, id]);
 		}
 	}
 
-	if (metadata.isRequested("flamework:guard")) {
+	if (metadata.isRequested(MetadataKeys.guard)) {
 		const guard = buildGuardFromType(state, field.type ?? field, type);
-		fields.push(["flamework:guard", guard]);
+		fields.push([MetadataKeys.guard, guard]);
 	}
 
 	return fields;
@@ -83,19 +105,19 @@ function generateMethodMetadata(state: TransformState, metadata: NodeMetadata, m
 	const baseSignature = state.typeChecker.getSignatureFromDeclaration(method);
 	if (!baseSignature) return [];
 
-	if (metadata.isRequested("flamework:return_type")) {
+	if (metadata.isRequested(MetadataKeys.returnType)) {
 		if (!method.type) {
 			const id = getTypeUid(state, baseSignature.getReturnType(), method.name ?? method);
-			fields.push(["flamework:return_type", id]);
+			fields.push([MetadataKeys.returnType, id]);
 		} else {
 			const id = getNodeUid(state, method.type);
-			fields.push(["flamework:return_type", id]);
+			fields.push([MetadataKeys.returnType, id]);
 		}
 	}
 
-	if (metadata.isRequested("flamework:return_guard")) {
+	if (metadata.isRequested(MetadataKeys.returnGuard)) {
 		const guard = buildGuardFromType(state, method.type ?? method, baseSignature.getReturnType());
-		fields.push(["flamework:return_guard", guard]);
+		fields.push([MetadataKeys.returnGuard, guard]);
 	}
 
 	const parameters = new Array<string>();
@@ -103,7 +125,7 @@ function generateMethodMetadata(state: TransformState, metadata: NodeMetadata, m
 	const parameterGuards = new Array<ts.Expression>();
 
 	for (const parameter of method.parameters) {
-		if (metadata.isRequested("flamework:parameters")) {
+		if (metadata.isRequested(MetadataKeys.parameters)) {
 			if (parameter.type) {
 				const id = getNodeUid(state, parameter.type);
 				parameters.push(id);
@@ -114,7 +136,7 @@ function generateMethodMetadata(state: TransformState, metadata: NodeMetadata, m
 			}
 		}
 
-		if (metadata.isRequested("flamework:parameter_names")) {
+		if (metadata.isRequested(MetadataKeys.parameterNames)) {
 			if (f.is.identifier(parameter.name)) {
 				parameterNames.push(parameter.name.text);
 			} else {
@@ -122,7 +144,7 @@ function generateMethodMetadata(state: TransformState, metadata: NodeMetadata, m
 			}
 		}
 
-		if (metadata.isRequested("flamework:parameter_guards")) {
+		if (metadata.isRequested(MetadataKeys.parameterGuards)) {
 			const type = state.typeChecker.getTypeAtLocation(parameter);
 			const guard = buildGuardFromType(state, parameter, type);
 			parameterGuards.push(guard);
@@ -130,59 +152,31 @@ function generateMethodMetadata(state: TransformState, metadata: NodeMetadata, m
 	}
 
 	if (parameters.length > 0) {
-		fields.push(["flamework:parameters", parameters]);
+		fields.push([MetadataKeys.parameters, parameters]);
 	}
 
 	if (parameterNames.length > 0) {
-		fields.push(["flamework:parameter_names", parameterNames]);
+		fields.push([MetadataKeys.parameterNames, parameterNames]);
 	}
 
 	if (parameterGuards.length > 0) {
-		fields.push(["flamework:parameter_guards", parameterGuards]);
+		fields.push([MetadataKeys.parameterGuards, parameterGuards]);
 	}
 
 	return fields;
 }
 
-function transformDecoratorConfig(
-	state: TransformState,
-	declaration: ts.ClassDeclaration,
-	symbol: ts.Symbol,
-	expr: ts.Expression,
-) {
-	if (!f.is.call(expr)) {
-		return [];
-	}
-
-	const metadata = NodeMetadata.fromSymbol(state, symbol);
-	if (metadata && metadata.isRequested("intrinsic-component-decorator")) {
-		assert(!expr.arguments[0] || f.is.object(expr.arguments[0]));
-
-		const baseConfig = expr.arguments[0] ? expr.arguments[0] : f.object([]);
-		const componentConfig = updateComponentConfig(state, declaration, [...baseConfig.properties]);
-		return [
-			f.update.object(
-				baseConfig,
-				componentConfig.map((v) => (baseConfig.properties.includes(v) ? state.transformNode(v) : v)),
-			),
-		];
-	}
-
-	return expr.arguments.map((v) => state.transformNode(v));
-}
-
 function generateClassMetadata(
 	state: TransformState,
-	classInfo: ClassInfo,
+	hasDecorators: boolean,
 	metadata: NodeMetadata,
 	node: ts.ClassDeclaration,
 ) {
 	const fields: [string, f.ConvertableExpression][] = [];
 
-	// Flamework decorators always generate the identifier field,
-	// but the new decorator system does not require the identifier metadata to be specified.
-	if (classInfo.containsLegacyDecorator || metadata.isRequested("identifier")) {
-		fields.push(["identifier", getNodeUid(state, node)]);
+	// Decorated classes always get an identifier, so dependency ids resolve through `Reflect.idToObj`.
+	if (hasDecorators || metadata.isRequested(MetadataKeys.identifier)) {
+		fields.push([MetadataKeys.identifier, getNodeUid(state, node)]);
 	}
 
 	const constructor = node.members.find((x): x is ts.ConstructorDeclaration => f.is.constructor(x));
@@ -200,8 +194,8 @@ function generateClassMetadata(
 			}
 		}
 
-		if (implementClauses.length > 0 && metadata.isRequested("flamework:implements")) {
-			fields.push(["flamework:implements", f.array(implementClauses, false)]);
+		if (implementClauses.length > 0 && metadata.isRequested(MetadataKeys.implements)) {
+			fields.push([MetadataKeys.implements, f.array(implementClauses, false)]);
 		}
 	}
 
@@ -235,7 +229,6 @@ function getDecoratorStatements(
 	const propertyName = ts.getNameFromPropertyName(node.name);
 	assert(propertyName);
 	assert(symbol);
-	const importIdentifier = state.addFileImport(state.getSourceFile(node), "@flamework/core", "Reflect");
 	const decoratorStatements = new Array<ts.Statement>();
 
 	const decorators = ts.canHaveDecorators(node) ? ts.getDecorators(node) : undefined;
@@ -244,14 +237,14 @@ function getDecoratorStatements(
 		for (let i = decorators.length - 1; i >= 0; i--) {
 			const decorator = decorators[i];
 			const expr = decorator.expression;
-			const type = state.typeChecker.getTypeAtLocation(expr);
-			if (type.getProperty("_flamework_Decorator")) {
+			if (isTypeTorchDecorator(state, decorator)) {
 				const identifier = f.is.call(expr) ? expr.expression : expr;
 				const symbol = state.getSymbol(identifier);
 				assert(symbol);
 				assert(symbol.valueDeclaration);
 
-				const args = transformDecoratorConfig(state, declaration, symbol, expr);
+				const importIdentifier = state.getReflect(state.getSourceFile(node));
+				const args = f.is.call(expr) ? expr.arguments.map((v) => state.transformNode(v)) : [];
 				const propertyArgs = !f.is.classDeclaration(node)
 					? [propertyName, (node.modifierFlagsCache & ts.ModifierFlags.Static) !== 0]
 					: [];
@@ -301,7 +294,7 @@ function addSectionComment(
 	}
 
 	const elementName = property === undefined ? `${declaration.name!.text}` : `${declaration.name!.text}.${property}`;
-	ts.addSyntheticLeadingComment(node, ts.SyntaxKind.SingleLineCommentTrivia, ` (Flamework) ${elementName} ${label}`);
+	ts.addSyntheticLeadingComment(node, ts.SyntaxKind.SingleLineCommentTrivia, ` (TypeTorch) ${elementName} ${label}`);
 }
 
 function formatType(type: ts.Type) {
@@ -324,7 +317,7 @@ function getAssignabilityDiagnostics(
 	const diagnostic = Diagnostics.createDiagnostic(
 		node,
 		ts.DiagnosticCategory.Error,
-		`Type '${formatType(sourceType)}' does not satify constraint '${formatType(constraintType)}'`,
+		`Type '${formatType(sourceType)}' does not satisfy constraint '${formatType(constraintType)}'`,
 	);
 
 	if (trace) {
@@ -342,7 +335,7 @@ function updateClass(state: TransformState, node: ts.ClassDeclaration, staticSta
 	const members = node.members
 		.map((node) => state.transformNode(node))
 		.map((member) => {
-			// Strip Flamework decorators from members
+			// Strip TypeTorch decorators from members
 			const modifiers = getAllModifiers(member);
 			if (modifiers) {
 				const filteredModifiers = transformModifiers(state, modifiers);
@@ -363,7 +356,7 @@ function updateClass(state: TransformState, node: ts.ClassDeclaration, staticSta
 			return member;
 		});
 
-	if (staticStatements) {
+	if (staticStatements && staticStatements.length > 0) {
 		members.push(f.staticBlockDeclaration(staticStatements));
 	}
 
@@ -383,13 +376,27 @@ function getAllModifiers(node: ts.Node) {
 
 function transformModifiers(state: TransformState, modifiers: readonly ts.ModifierLike[]) {
 	return modifiers
-		.filter((modifier) => {
-			if (!ts.isDecorator(modifier)) {
-				return true;
-			}
-
-			const type = state.typeChecker.getTypeAtLocation(modifier.expression);
-			return type.getProperty("_flamework_Decorator") === undefined;
-		})
+		.filter((modifier) => !ts.isDecorator(modifier) || !isTypeTorchDecorator(state, modifier))
 		.map((decorator) => state.transform(decorator));
+}
+
+function isTypeTorchDecorator(state: TransformState, decorator: ts.Decorator) {
+	const decoratorType = state.typeChecker.getTypeAtLocation(decorator.expression);
+	return decoratorType.getProperty(DECORATOR_MARKER) !== undefined;
+}
+
+function hasTypeTorchDecorators(state: TransformState, declaration: ts.ClassDeclaration) {
+	const nodeDecorators = ts.canHaveDecorators(declaration) ? ts.getDecorators(declaration) : undefined;
+	if (nodeDecorators && nodeDecorators.some((v) => isTypeTorchDecorator(state, v))) {
+		return true;
+	}
+
+	for (const member of declaration.members) {
+		const nodeDecorators = ts.canHaveDecorators(member) ? ts.getDecorators(member) : undefined;
+		if (nodeDecorators && nodeDecorators.some((v) => isTypeTorchDecorator(state, v))) {
+			return true;
+		}
+	}
+
+	return false;
 }

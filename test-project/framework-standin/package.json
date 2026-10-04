@@ -1,0 +1,21 @@
+{
+	"name": "@typetorch/framework",
+	"version": "0.0.0-fixture",
+	"private": true,
+	"description": "Test stand-in for @typetorch/framework: the transformer's runtime kit (src/reflection, copied from ../../runtime-kit) plus a few framework-like declarations.",
+	"main": "out/init.lua",
+	"types": "out/index.d.ts",
+	"files": ["out", "!**/*.tsbuildinfo"],
+	"scripts": {
+		"build": "rbxtsc --type package"
+	},
+	"dependencies": {
+		"@rbxts/t": "^3.2.1"
+	},
+	"devDependencies": {
+		"@rbxts/compiler-types": "^3.0.0-types.0",
+		"@rbxts/types": "^1.0.944",
+		"roblox-ts": "^3.0.0",
+		"typescript": "5.5.3"
+	}
+}
