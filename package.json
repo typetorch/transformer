@@ -1,6 +1,6 @@
 {
 	"name": "@typetorch/transformer",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "roblox-ts transformer for TypeTorch: user macros (generated t guards, stable type ids) and DI class metadata. A stripped-down fork of rbxts-transformer-flamework.",
 	"keywords": ["roblox-ts", "rbxts", "transformer", "typetorch", "macros", "guards", "dependency-injection"],
 	"main": "out/index.js",
@@ -10,7 +10,7 @@
 	"homepage": "https://github.com/typetorch/transformer#readme",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/typetorch/transformer"
+		"url": "git+https://github.com/typetorch/transformer.git"
 	},
 	"bugs": {
 		"url": "https://github.com/typetorch/transformer/issues"
@@ -22,9 +22,9 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"watch": "tsc -p tsconfig.json -w",
-		"clean": "bun -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+		"clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
 		"test": "bun test-project/scripts/run.ts",
-		"prepublishOnly": "bun run clean && bun run build"
+		"prepublishOnly": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\" && tsc -p tsconfig.json"
 	},
 	"peerDependencies": {
 		"roblox-ts": "^3.0.0",

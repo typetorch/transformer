@@ -3,7 +3,7 @@
 	"version": "0.0.0-fixture",
 	"private": true,
 	"description": "Test stand-in for @typetorch/framework: the transformer's runtime kit (src/reflection, copied from ../../runtime-kit) plus a few framework-like declarations.",
-	"main": "out/init.lua",
+	"main": "out/init.luau",
 	"types": "out/index.d.ts",
 	"files": ["out", "!**/*.tsbuildinfo"],
 	"scripts": {

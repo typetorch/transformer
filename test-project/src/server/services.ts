@@ -35,4 +35,15 @@ export function runChecks() {
 	$print(`payload good=${isPayload({ id: "a" })} bad=${isPayload({ id: 1 })}`);
 	$print(`guards=${network.clientToServer.size()}+${network.serverToClient.size()}`);
 	$print(describe<Payload>().text, here(), argNames<ShopService["buy"]>().join(","));
+
+	// Read by scripts/runtime.luau (Lune), which runs this code from fixture.rbxm.
+	return {
+		reflect: Reflect,
+		parameters: parameters.join(","),
+		resolved: resolved[0] === DataService && resolved[1] === FrameworkLogger,
+		registered: registered.size(),
+		payloadGood: isPayload({ id: "a", meta: { color: new Color3(1, 0, 0), tags: ["x"] } }),
+		payloadBad: isPayload({ id: 1 }),
+		guards: network.clientToServer.size() + network.serverToClient.size(),
+	};
 }

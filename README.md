@@ -12,11 +12,17 @@ It is a stripped-down fork of [rbxts-transformer-flamework](https://github.com/r
 the guard builder and macro engine kept as they are. TypeTorch projects don't depend on Flamework at all: the runtime
 (`Reflect`, `Modding`) lives in `@typetorch/framework`, and its source is in [`runtime-kit/`](runtime-kit).
 
-## Usage
+## Install
 
 ```sh
-bun add -d @typetorch/transformer typescript@5.5.3 roblox-ts
+npm i @typetorch/framework
+npm i -D @typetorch/transformer
 ```
+
+(`bun add @typetorch/framework` and `bun add -d @typetorch/transformer` work the same.) The transformer runs inside
+`rbxtsc`: it needs `roblox-ts` 3 and the `typescript` it uses (5.5), which every roblox-ts project already has. The
+runtime its generated code imports (`Reflect`, `Modding`, `t`) is `@typetorch/framework`; nothing from Flamework is
+needed.
 
 `tsconfig.json` of a game (TypeTorch payloads are roblox-ts Model projects):
 
@@ -262,10 +268,17 @@ bun run build    # tsc -> out/
 bun run test     # builds, then runs test-project/scripts/run.ts
 ```
 
-The test fixture compiles a stand-in `@typetorch/framework` (the runtime kit plus a decorated class and a
-`createNetwork` macro, built as a package with this transformer) and a Model project that uses it, builds the model
-with Rojo, and checks the emitted Luau: a guard per nested leaf, the id strings, `typetorch:parameters`, the `Reflect`
-import, and that a package declaration has the same id in both compiles.
+The test fixture compiles a stand-in `@typetorch/framework`, laid out like the real one (the runtime kit, `Service`
+and `Controller` in `decorators.ts`, an abstract `Module` base, `createNetwork` in `net/index.ts` with `GuardTree` in
+`net/types.ts`, a decorated class; built as a package with this transformer), and a Model project that uses it. It
+builds the model with Rojo and checks the emitted Luau: a guard per nested leaf, the id strings, `typetorch:parameters`
+(also on derived classes and classes without a constructor), the `Reflect` import, the `t` re-export, and that a
+package declaration has the same id in both compiles. Then `test-project/scripts/runtime.luau` runs the model under
+[Lune](https://lune-org.github.io/docs) (pinned in `test-project/rokit.toml`): two generations in one emulated VM,
+each with a fresh `Reflect` registry, resolving DI ids and running the generated guards. 47 checks in all.
+
+The package ships only `out/`, `README.md` and `LICENSE` (`bun pm pack --dry-run` lists them). `prepublishOnly`
+cleans and rebuilds `out/`.
 
 ## Credits and license
 

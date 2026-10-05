@@ -7,6 +7,8 @@
  *    as a roblox-ts package, with the transformer (self-compile: Reflect is imported relatively).
  * 3. Packs the stand-in into node_modules/@typetorch/framework of this Model project and compiles it.
  * 4. Builds the model with Rojo and checks the emitted Luau.
+ * 5. Runs the emitted Luau under Lune (scripts/runtime.luau): two generations of the model in one VM, each with a
+ *    fresh Reflect registry, decorators, DI ids, guards and macros.
  *
  * Local packages are unpacked into node_modules by hand: Bun can't install `file:` folders on this machine (EPERM),
  * and it caches `file:` tarballs by name, so a rebuilt tarball would never be picked up.
@@ -120,7 +122,9 @@ step("check the emitted Luau");
 const out = join(fixture, "out");
 const network = read(join(out, "shared", "network.luau"));
 const services = read(join(out, "server", "services.luau"));
+const client = read(join(out, "client", "main.luau"));
 const standinFixture = read(join(standin, "out", "fixture.luau"));
+const standinReflection = read(join(standin, "out", "reflection", "init.luau"));
 
 const leaves = ["buy", "equip", "drop", "say", "changed", "prices", "notice"];
 for (const leaf of leaves) {
@@ -144,7 +148,7 @@ check(
 );
 check(
 	"decorator call is replaced by Reflect.decorate with the package decorator id",
-	/Reflect\.decorate\(ShopService, "@typetorch\/framework:fixture@Service", Service, \{ \{\s*loadOrder = 10,?\s*\} \}\)/.test(services),
+	/Reflect\.decorate\(ShopService, "@typetorch\/framework:decorators@Service", Service, \{ \{\s*loadOrder = 10,?\s*\} \}\)/.test(services),
 	excerpt(services, /Reflect\.decorate\(ShopService/),
 );
 check(
@@ -162,6 +166,27 @@ check(
 	"the package's own compile imports Reflect relatively",
 	/TS\.import\(script, script\.Parent, "reflection", "reflect"\)/.test(standinFixture),
 	excerpt(standinFixture, /"reflection", "reflect"/),
+);
+check(
+	"a class extending the package's abstract base with no constructor gets an identifier and no parameters",
+	client.includes(`Reflect.defineMetadata(HudController, "identifier", "client/main@HudController")`) &&
+		!/defineMetadata\(HudController, "typetorch:parameters"/.test(client),
+	excerpt(client, /HudController, "identifier"/),
+);
+check(
+	"a second decorator from the package's decorators module (Controller) is replaced by Reflect.decorate",
+	/Reflect\.decorate\(HudController, "@typetorch\/framework:decorators@Controller", Controller, \{\}\)/.test(client),
+	excerpt(client, /Reflect\.decorate\(HudController/),
+);
+check(
+	"a derived class's constructor (with super()) lists its injected controller",
+	client.includes(`Reflect.defineMetadata(MenuController, "typetorch:parameters", { "client/main@HudController" })`),
+	excerpt(client, /MenuController, "typetorch:parameters"/),
+);
+check(
+	"the runtime package re-exports t for generated guards",
+	/\bt = TS\.import\(.*"@rbxts", "t"/.test(standinReflection) || /exports\.t = /.test(standinReflection),
+	excerpt(standinReflection, /\bt\b/),
 );
 check("guardOf<Payload>() builds an interface guard", /guardOf\(t\.interface\(/.test(services), excerpt(services, /guardOf\(/));
 check("caller macro fills line and text", /here\(\d+, "here\(\)"\)/.test(services), excerpt(services, /here\(/));
@@ -186,6 +211,19 @@ check("bun pm ls shows no Flamework packages", pmLs.length > 0 && !/flamework/i.
 
 const model = join(fixture, "fixture.rbxm");
 check("rojo built the model", existsSync(model) && statSync(model).size > 0, `${statSync(model).size} bytes`);
+
+step("run the emitted Luau under Lune (two generations, fresh registries)");
+const lune = Bun.spawnSync(["lune", "run", "scripts/runtime.luau", "fixture.rbxm"], { cwd: fixture, stdout: "pipe", stderr: "pipe" });
+const luneOutput = `${lune.stdout.toString()}${lune.stderr.toString()}`;
+for (const line of luneOutput.split("\n")) {
+	const match = /^(PASS|FAIL) {2}(.*)$/.exec(line.trimEnd());
+	if (match) check(`runtime: ${match[2]}`, match[1] === "PASS");
+}
+check(
+	"the Lune runtime check exited cleanly",
+	lune.exitCode === 0,
+	lune.exitCode === 0 ? undefined : luneOutput.trim().split("\n").slice(-8).join("\n      "),
+);
 
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
