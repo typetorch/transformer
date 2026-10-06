@@ -1,4 +1,4 @@
-import { FrameworkLogger, Reflect, Service, registered } from "@typetorch/framework";
+import { FrameworkLogger, Reflect, Service, registered, type Lazy } from "@typetorch/framework";
 import { $print } from "rbxts-transform-debug";
 import { argNames, describe, guardOf, here, idOf } from "../shared/macros";
 import { network, Payload } from "../shared/network";
@@ -23,6 +23,20 @@ export class ShopService {
 	}
 }
 
+/** Lazy<T> constructor parameters (0.2.1): `lazy:<id of T>`, so two modules can take each other. */
+@Service()
+export class TeamService {
+	constructor(
+		private readonly items: Lazy<ItemService>,
+		private readonly data: DataService,
+	) {}
+}
+
+@Service()
+export class ItemService {
+	constructor(private readonly team: Lazy<TeamService>) {}
+}
+
 export function runChecks() {
 	const parameters = Reflect.getOwnMetadata<string[]>(ShopService, "typetorch:parameters") ?? [];
 	const loggerId = idOf<FrameworkLogger>();
@@ -40,6 +54,7 @@ export function runChecks() {
 	return {
 		reflect: Reflect,
 		parameters: parameters.join(","),
+		teamParameters: (Reflect.getOwnMetadata<string[]>(TeamService, "typetorch:parameters") ?? []).join(","),
 		resolved: resolved[0] === DataService && resolved[1] === FrameworkLogger,
 		registered: registered.size(),
 		payloadGood: isPayload({ id: "a", meta: { color: new Color3(1, 0, 0), tags: ["x"] } }),

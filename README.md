@@ -191,6 +191,12 @@ Reflect.decorate(ShopService, "@typetorch/framework:decorators@Service", Service
 `Reflect.decorate` runs the decorator's callback with `{ id, object, constructor, property?, isStatic? }` and the
 arguments. A dependency id resolves to its class through `Reflect.idToObj.get(id)` (or `Reflect.getObjectFromId`).
 
+**Lazy parameters (0.2.1).** A parameter whose type has the type-only property `_typetorch_lazy: T` (the framework's
+`Lazy<T>`) records `lazy:<id of T>` instead of its own type's id: `constructor(private readonly team: Lazy<TeamService>)`
+gives `{ "lazy:server/services/team@TeamService" }`. The framework hands it a handle that resolves T on first use and
+leaves that edge out of the start order, so two modules can take each other. Without the marker, a type reference's id
+drops its type arguments (`Lazy<A>` and `Lazy<B>` would both be `Lazy`'s id).
+
 Metadata is requested with JSDoc `@metadata <keys...>` on the class itself, on a decorator's declaration, or on an
 interface the class implements. Prefix a key with `~` to opt out of it, `*` asks for everything.
 

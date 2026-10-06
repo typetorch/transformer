@@ -10,3 +10,4 @@ export { createNetwork } from "./net";
 export type { NetworkGuards } from "./net";
 export type { GuardTree } from "./net/types";
 export { FrameworkLogger } from "./fixture";
+export type { Lazy } from "./lazy";

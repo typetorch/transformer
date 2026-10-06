@@ -13,6 +13,22 @@ import { getNodeUid, getSymbolUid, getTypeUid } from "../../util/uid";
 export const DECORATOR_MARKER = "_typetorch_decorator";
 
 /**
+ * The property that marks a lazy module reference (`Lazy<T>` in @typetorch/framework: `readonly _typetorch_lazy: T`,
+ * type-only). A constructor parameter of such a type records `lazy:<id of T>` in `typetorch:parameters`, so the DI
+ * hands it a handle that resolves T on first use (and its start order ignores that edge) instead of injecting it.
+ * Without this, the id would be `Lazy`'s own: type arguments aren't part of a type reference's id.
+ */
+export const LAZY_MARKER = "_typetorch_lazy";
+
+/** `lazy:<id of T>` for a parameter whose type carries the lazy marker, else undefined. */
+function getLazyParameterId(state: TransformState, parameter: ts.ParameterDeclaration): string | undefined {
+	const type = state.typeChecker.getTypeAtLocation(parameter).getNonNullableType();
+	const target = state.typeChecker.getTypeOfPropertyOfType(type, LAZY_MARKER);
+	if (!target) return undefined;
+	return `lazy:${getTypeUid(state, target, parameter)}`;
+}
+
+/**
  * Reflect metadata keys. A class (or member) asks for them with JSDoc on itself, on a decorator's declaration, or on
  * an interface it implements: `@metadata typetorch:parameters injectable`.
  */
@@ -126,7 +142,10 @@ function generateMethodMetadata(state: TransformState, metadata: NodeMetadata, m
 
 	for (const parameter of method.parameters) {
 		if (metadata.isRequested(MetadataKeys.parameters)) {
-			if (parameter.type) {
+			const lazyId = getLazyParameterId(state, parameter);
+			if (lazyId !== undefined) {
+				parameters.push(lazyId);
+			} else if (parameter.type) {
 				const id = getNodeUid(state, parameter.type);
 				parameters.push(id);
 			} else {

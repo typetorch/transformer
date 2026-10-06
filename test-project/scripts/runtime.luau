@@ -209,9 +209,14 @@ for index = 1, 2 do
 	local results = result.checks
 	check(`generation {index}: ShopService's dependency ids resolve through Reflect.idToObj`, results.resolved, results.parameters)
 	check(
-		`generation {index}: 5 classes registered by decorators (fresh registry)`,
-		results.registered == 5,
+		`generation {index}: 7 classes registered by decorators (fresh registry)`,
+		results.registered == 7,
 		`registered = {results.registered}`
+	)
+	check(
+		`generation {index}: a Lazy<T> constructor parameter records lazy:<id of T>, a plain one its id`,
+		results.teamParameters == "lazy:server/services@ItemService,server/services@DataService",
+		results.teamParameters
 	)
 	check(`generation {index}: guardOf<Payload>() accepts a payload and rejects a bad one`, results.payloadGood and not results.payloadBad)
 	check(`generation {index}: createNetwork built 7 leaf guards`, results.guards == 7, `guards = {results.guards}`)
@@ -233,7 +238,7 @@ if generations[1] and generations[2] then
 	for _ in first.idToObj do
 		count += 1
 	end
-	check("the first generation's registry is untouched by the second", count == 5, `ids = {count}`)
+	check("the first generation's registry is untouched by the second", count == 7, `ids = {count}`)
 end
 
 print(if failed == 0 then `\nRuntime: all {passed} checks passed.` else `\nRuntime: {failed} check(s) failed.`)

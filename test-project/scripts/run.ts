@@ -142,6 +142,12 @@ check(
 	excerpt(services, /typetorch:parameters/),
 );
 check(
+	"a Lazy<T> constructor parameter records lazy:<id of T> (the marker type), next to a plain dependency id",
+	services.includes(`Reflect.defineMetadata(TeamService, "typetorch:parameters", { "lazy:server/services@ItemService", "server/services@DataService" })`) &&
+		services.includes(`Reflect.defineMetadata(ItemService, "typetorch:parameters", { "lazy:server/services@TeamService" })`),
+	excerpt(services, /TeamService, "typetorch:parameters"/),
+);
+check(
 	"decorated class gets an identifier",
 	services.includes(`Reflect.defineMetadata(ShopService, "identifier", "server/services@ShopService")`),
 	excerpt(services, /"identifier", "server\/services@ShopService"/),
