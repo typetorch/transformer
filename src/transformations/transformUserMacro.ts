@@ -1,11 +1,23 @@
 import { randomUUID } from "crypto";
 import ts from "typescript";
 import { Diagnostics } from "../classes/diagnostics";
+import { NodeMetadata } from "../classes/nodeMetadata";
 import { TransformState } from "../classes/transformState";
+import { withDiagnosticContext } from "../util/diagnosticsUtils";
 import { f } from "../util/factory";
 import { buildGuardFromTypeWithDedup } from "../util/functions/buildGuardFromType";
+import { checkNetworkLeaf, SUPPORTED_NETWORK_TYPES } from "../util/functions/checkNetworkLeaf";
 import { getTypeUid } from "../util/uid";
 import { isTupleType } from "../util/functions/isTupleType";
+
+/**
+ * Where a macro value sits in a `@metadata macro network` call (createNetwork, createFlameworkCompat): the dotted path
+ * of the leaf and its declaration, so guard problems name the leaf.
+ */
+interface NetworkContext {
+	path: string[];
+	declaration?: ts.Node;
+}
 
 /**
  * Property names that mark TypeTorch's macro types (see `Modding` in the runtime kit). They only exist in the type
@@ -44,10 +56,14 @@ export function transformUserMacro(
 		}
 	}
 
+	// `@metadata macro network`: the macro's trees are network leaves (guards get leaf-level diagnostics).
+	const declaration = signature.getDeclaration();
+	const network = declaration !== undefined && new NodeMetadata(state, declaration).isRequested("network");
+
 	for (let i = 0; i <= highestParameterIndex; i++) {
 		const userMacro = parameters.get(i);
 		if (userMacro) {
-			args[i] = buildUserMacro(state, node, userMacro);
+			args[i] = buildUserMacro(state, node, userMacro, network ? { path: [] } : undefined);
 		} else {
 			args[i] = args[i] ? state.transform(args[i]) : f.nil();
 		}
@@ -100,7 +116,12 @@ function getLabels(state: TransformState, type: ts.Type): UserMacro {
 	};
 }
 
-function buildUserMacro(state: TransformState, node: ts.Expression, macro: UserMacro): ts.AsExpression {
+function buildUserMacro(
+	state: TransformState,
+	node: ts.Expression,
+	macro: UserMacro,
+	network?: NetworkContext,
+): ts.AsExpression {
 	if (macro.kind === "generic") {
 		const metadata = getGenericMetadata(macro);
 		if (metadata) {
@@ -113,12 +134,22 @@ function buildUserMacro(state: TransformState, node: ts.Expression, macro: UserM
 		}
 	} else if (macro.kind === "many") {
 		if (Array.isArray(macro.members)) {
-			return f.asNever(f.array(macro.members.map((userMacro) => buildUserMacro(state, node, userMacro))));
+			return f.asNever(
+				f.array(
+					macro.members.map((userMacro, index) =>
+						buildUserMacro(state, node, userMacro, network && { path: [...network.path, `${index + 1}`] }),
+					),
+				),
+			);
 		} else {
 			const elements = new Array<ts.ObjectLiteralElementLike>();
 
 			for (const [name, userMacro] of macro.members) {
-				const expression = buildUserMacro(state, node, userMacro);
+				const memberNetwork = network && {
+					path: [...network.path, name],
+					declaration: macro.declarations?.get(name) ?? network.declaration,
+				};
+				const expression = buildUserMacro(state, node, userMacro, memberNetwork);
 				if (f.is.nil(expression.expression)) {
 					continue;
 				}
@@ -149,6 +180,8 @@ function buildUserMacro(state: TransformState, node: ts.Expression, macro: UserM
 		}
 
 		if (macro.metadata === "guard") {
+			if (network && network.path.length > 0) return buildNetworkLeafGuard(macro.target, network);
+
 			const result = buildGuardFromTypeWithDedup(state, node, macro.target);
 			state.prereqList(result.statements);
 
@@ -158,6 +191,23 @@ function buildUserMacro(state: TransformState, node: ts.Expression, macro: UserM
 		if (macro.metadata === "text") {
 			return f.string(state.typeChecker.typeToString(macro.target));
 		}
+	}
+
+	/**
+	 * A network leaf's guard: warnings for signatures the guard can't enforce or values that never arrive, and a guard
+	 * error that names the leaf and lists the supported parameter types.
+	 */
+	function buildNetworkLeafGuard(target: ts.Type, network: NetworkContext) {
+		const leaf = network.path.join(".");
+		const at = network.declaration && network.declaration.getSourceFile() ? network.declaration : node;
+		checkNetworkLeaf(state, at, leaf, target, network.declaration);
+		const result = withDiagnosticContext(
+			node,
+			() => `Network leaf "${leaf}": no guard can be generated for its parameters (details below). ${SUPPORTED_NETWORK_TYPES}`,
+			() => buildGuardFromTypeWithDedup(state, node, target),
+		);
+		state.prereqList(result.statements);
+		return result.guard;
 	}
 
 	function getCallerMetadata(macro: UserMacro & { kind: "caller" }) {
@@ -239,6 +289,7 @@ function getUserMacroOfMany(state: TransformState, node: ts.Expression, target: 
 		};
 	} else if (isObjectType(target)) {
 		const userMacros = new Map<string, UserMacro>();
+		const declarations = new Map<string, ts.Node>();
 
 		for (const member of target.getProperties()) {
 			const memberType = state.typeChecker.getTypeOfPropertyOfType(target, member.name);
@@ -248,10 +299,14 @@ function getUserMacroOfMany(state: TransformState, node: ts.Expression, target: 
 			if (!userMacro) return;
 
 			userMacros.set(member.name, userMacro);
+			// A mapped type's property keeps the declaration it was mapped from (the leaf in the game's interface).
+			const declaration = member.valueDeclaration ?? member.declarations?.[0];
+			if (declaration) declarations.set(member.name, declaration);
 		}
 
 		return {
 			kind: "many",
+			declarations,
 			members: userMacros,
 		};
 	} else if (target.isStringLiteral() || target.isNumberLiteral()) {
@@ -371,6 +426,8 @@ export type UserMacro =
 	| {
 			kind: "many";
 			members: Map<string, UserMacro> | Array<UserMacro>;
+			/** Object members: where each was declared (network leaves report there). */
+			declarations?: Map<string, ts.Node>;
 	  }
 	| {
 			kind: "literal";

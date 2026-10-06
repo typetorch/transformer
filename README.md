@@ -161,6 +161,23 @@ The guard builder is Flamework's, unchanged. Highlights:
 Not supported (a compile error points at the type): template literal types, classes, and more than one index
 signature.
 
+### Network leaves (`@metadata macro network`)
+
+A macro tagged `@metadata macro network` (the framework's `createNetwork` and `createFlameworkCompat`) declares
+network leaves: every `Modding.Generic<A, "guard">` inside its `Modding.Many` trees is one leaf's parameter list, named
+by its dotted path. For those, the transformer also reports what a guard can't do, at the leaf's declaration:
+
+| Leaf | Diagnostic |
+|---|---|
+| no guard possible (a class, a template literal type, ...) | **error** `Network leaf "a.b": no guard can be generated for its parameters`, with the original reason and the supported parameter types |
+| generic or conditional signature (`<T extends Model \| undefined>(box: T, group: T extends Model ? string : undefined) => void`) | **warning**: the guard checks each type parameter as its constraint and a conditional type as either branch, so how the arguments go together isn't enforced. Use a union of tuples (`(...args: [box: Model, group: string] \| [box: undefined]) => void`) or separate leaves |
+| a parameter (or a field inside one) that never arrives: a function, `thread`, `RBXScriptSignal`, `RBXScriptConnection`, an `AnimationTrack` | **warning**: Roblox sends nil, so a client -> server guard refuses every message and the other direction gets nil |
+
+Supported parameter types: string, number, boolean, undefined/optional, literals and TS enums, Enum items, Roblox
+datatypes, Instances by class, arrays, tuples, Maps, Sets, plain objects/interfaces, unions, `buffer`, and
+`unknown`/`any`. Warnings don't stop the build; the leaf keeps its (loose) guard. Older transformers ignore the
+`network` key.
+
 ## Class metadata
 
 Decorators made with `Modding.createDecorator` or `Modding.createMetaDecorator` are TypeTorch decorators. The
@@ -279,9 +296,12 @@ and `Controller` in `decorators.ts`, an abstract `Module` base, `createNetwork` 
 `net/types.ts`, a decorated class; built as a package with this transformer), and a Model project that uses it. It
 builds the model with Rojo and checks the emitted Luau: a guard per nested leaf, the id strings, `typetorch:parameters`
 (also on derived classes and classes without a constructor), the `Reflect` import, the `t` re-export, and that a
-package declaration has the same id in both compiles. Then `test-project/scripts/runtime.luau` runs the model under
+package declaration has the same id in both compiles. It also checks the network leaf diagnostics: a compile with a
+leaf that takes a class fails with an error naming the leaf, and `src/shared/leaf-warnings.ts` (a generic leaf, an
+AnimationTrack, a function, a thread and a connection) compiles with one warning each, at the leaf. Then
+`test-project/scripts/runtime.luau` runs the model under
 [Lune](https://lune-org.github.io/docs) (pinned in `test-project/rokit.toml`): two generations in one emulated VM,
-each with a fresh `Reflect` registry, resolving DI ids and running the generated guards. 47 checks in all.
+each with a fresh `Reflect` registry, resolving DI ids and running the generated guards. 58 checks in all.
 
 The package ships only `out/`, `README.md` and `LICENSE` (`bun pm pack --dry-run` lists them). `prepublishOnly`
 cleans and rebuilds `out/`.

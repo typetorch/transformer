@@ -19,9 +19,10 @@ export interface NetworkGuards {
 
 /**
  * Stand-in for framework/src/net createNetwork: a macro declared in a package, in a different module than the
- * GuardTree type it uses (both reach the game only through `.d.ts` files).
+ * GuardTree type it uses (both reach the game only through `.d.ts` files). `network`: guard
+ * problems name the leaf (generic signatures, values that never arrive, types with no guard).
  *
- * @metadata macro
+ * @metadata macro network
  */
 export function createNetwork<ClientToServer extends object, ServerToClient extends object>(
 	clientToServer?: Modding.Many<GuardTree<ClientToServer>>,

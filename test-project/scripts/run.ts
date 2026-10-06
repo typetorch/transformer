@@ -40,6 +40,17 @@ function rbxtsc(cwd: string, ...args: string[]) {
 	run(["node", join(cwd, "node_modules", "roblox-ts", "out", "CLI", "cli.js"), ...args], cwd);
 }
 
+/** rbxtsc with its output captured (printed too) instead of stopping on failure. */
+function rbxtscCaptured(cwd: string, ...args: string[]) {
+	const command = ["node", join(cwd, "node_modules", "roblox-ts", "out", "CLI", "cli.js"), ...args];
+	console.log(`$ ${command.join(" ")}   (in ${relative(root, cwd) || "."})`);
+	const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
+	const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+	if (output.trim() !== "") console.log(output.trimEnd());
+	// Without the colour codes, so checks can match "file.ts:14:3".
+	return { exitCode: result.exitCode, output: output.replace(/\x1b\[[0-9;]*m/g, "") };
+}
+
 /** `bun pm pack` the package, then unpack it into each destination folder. */
 function packInto(packageDir: string, destinations: string[]) {
 	rmSync(packDir, { recursive: true, force: true });
@@ -110,9 +121,70 @@ rmSync(join(fixture, "out"), { recursive: true, force: true });
 rbxtsc(fixture, "-p", "tsconfig.linked.json");
 const linkedOutput = new Map(walk(join(fixture, "out")).map((path) => [relative(fixture, path), read(path)]));
 
+step("network leaf diagnostics: a leaf with no possible guard fails and names the leaf");
+const badLeaf = join(fixture, "src", "shared", "bad-leaf.ts");
+await Bun.write(
+	badLeaf,
+	[
+		'import { createNetwork } from "@typetorch/framework";',
+		"class Weapon {",
+		"	damage = 1;",
+		"}",
+		"interface ClientToServer {",
+		"	armory: { equip(weapon: Weapon): void };",
+		"}",
+		"export const bad = createNetwork<ClientToServer, {}>();",
+		"",
+	].join("\n"),
+);
+rmSync(join(fixture, "out"), { recursive: true, force: true });
+const badCompile = rbxtscCaptured(fixture);
+rmSync(badLeaf, { force: true });
+check("a leaf whose parameters can't be guarded fails the compile", badCompile.exitCode !== 0);
+check(
+	"the error names the leaf and lists the supported parameter types",
+	badCompile.output.includes('Network leaf "armory.equip": no guard can be generated') &&
+		badCompile.output.includes("Supported parameter types:") &&
+		badCompile.output.includes("Guards cannot be generated for classes"),
+	excerpt(badCompile.output, /Network leaf/, 3),
+);
+
 step("compile the fixture (Model project)");
 rmSync(join(fixture, "out"), { recursive: true, force: true });
-rbxtsc(fixture);
+const fixtureCompile = rbxtscCaptured(fixture);
+if (fixtureCompile.exitCode !== 0) {
+	console.error("FAILED: the fixture didn't compile");
+	process.exit(1);
+}
+const warnings = fixtureCompile.output;
+check(
+	"warning: a generic leaf names the leaf, how its type parameters are checked, and the fix",
+	warnings.includes('Network leaf "carry.notify" has a generic or conditional signature') &&
+		warnings.includes("T as Model | undefined") &&
+		warnings.includes("union of tuples"),
+	excerpt(warnings, /carry\.notify/, 2),
+);
+check(
+	"warning: an AnimationTrack parameter never arrives (named, with what to send instead)",
+	warnings.includes('Network leaf "patches.looped", parameter "track": an AnimationTrack doesn\'t replicate'),
+	excerpt(warnings, /patches\.looped/),
+);
+check(
+	"warning: functions, threads and connections, nested ones too",
+	warnings.includes('Network leaf "patches.later", parameter "done": a function can\'t be sent') &&
+		warnings.includes('Network leaf "patches.later", parameter "options".co: a thread can\'t be sent') &&
+		warnings.includes('Network leaf "patches.later", parameter "options".conn: an RBXScriptConnection can\'t be sent'),
+	excerpt(warnings, /patches\.later/, 3),
+);
+check("no warning for a leaf of supported types", !warnings.includes('"fine"'));
+check("the warnings point at the leaf's declaration", /leaf-warnings\.ts:1[0-9]:/.test(warnings), excerpt(warnings, /leaf-warnings\.ts/));
+const leafWarnings = read(join(fixture, "out", "shared", "leaf-warnings.luau"));
+check(
+	"leaves with warnings still get their guards",
+	/notify = t\.strictArray\(t\.optional\(t\.instanceIsA\("Model"\)\), t\.optional\(t\.string\)\)/.test(leafWarnings) &&
+		/looped = t\.strictArray\(/.test(leafWarnings),
+	excerpt(leafWarnings, /notify = /),
+);
 
 step("build the model with Rojo");
 rmSync(join(fixture, "fixture.rbxm"), { force: true });
