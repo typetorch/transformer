@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/typetorch/docs/main/brand/typetorch.svg" width="64" alt="TypeTorch logo">
+
 # @typetorch/transformer
 
 The roblox-ts transformer behind [TypeTorch](https://github.com/typetorch). It does two things at compile time:
