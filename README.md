@@ -12,7 +12,11 @@ The roblox-ts transformer behind [TypeTorch](https://github.com/typetorch). It d
 
 It is a stripped-down fork of [rbxts-transformer-flamework](https://github.com/rbxts-flamework/transformer) (MIT), with
 the guard builder and macro engine kept as they are. TypeTorch projects don't depend on Flamework at all: the runtime
-(`Reflect`, `Modding`) lives in `@typetorch/framework`, and its source is in [`runtime-kit/`](runtime-kit).
+(`Reflect`, `Modding`) lives in `@typetorch/framework`, and the source of truth for it is [`runtime-kit/`](runtime-kit).
+
+The transformer runs in the game's compile. `@typetorch/framework` only declares the macros and decorators and compiles
+without it (it lists `@typetorch/transformer` as an optional peer dependency); the macros expand where a game calls
+them.
 
 ## Install
 
@@ -60,7 +64,7 @@ Passed in the plugin entry: `{ "transform": "@typetorch/transformer", "runtimeMo
 | Option | Default | Meaning |
 |---|---|---|
 | `runtimeModule` | `"@typetorch/framework"` | Module generated code imports `Reflect` from (and `t`, see below). |
-| `runtimeReflectPath` | `"reflection/reflect"` | Only while compiling the runtime package itself: the rootDir-relative file exporting `Reflect`. Generated code imports it relatively, since a package can't import itself by name. |
+| `runtimeReflectPath` | `"reflection/reflect"` | Only when the runtime package itself compiles with the transformer (package name equals `runtimeModule`; the test fixture's stand-in does, the real framework doesn't): the rootDir-relative file exporting `Reflect`. Generated code imports it relatively, since a package can't import itself by name. |
 | `guardModule` | automatic | Module generated guards import `t` from. By default `@rbxts/t` when the file resolves the same copy as the runtime package, otherwise `t` re-exported by `runtimeModule`. |
 | `noSemanticDiagnostics` | `false` | Skip TypeScript's semantic checks before transforming each file. Faster, riskier. |
 | `optimizations.guardGenerationDedupLimit` | off | Types used this many times inside one guard are hoisted into a local and reused. |
@@ -253,8 +257,9 @@ their namespaces (`Outer.Inner`). Primitives are `$p:string`, `$p:number`, ...; 
 
 ## Runtime kit
 
-[`runtime-kit/`](runtime-kit) holds the roblox-ts source of the runtime half, to be copied into `@typetorch/framework`
-as `src/reflection/` and re-exported from its root:
+[`runtime-kit/`](runtime-kit) holds the roblox-ts source of the runtime half. `@typetorch/framework` carries copies of
+`reflect.ts` and `modding.ts` in `src/reflection/` and exports them from its root; the kit is the source of truth, so a
+change here is copied there and the two stay identical. It contains:
 
 - `Reflect`: `defineMetadata` (with the special `identifier` key), `getOwnMetadata`, `hasOwnMetadata`, `getMetadata`
   and `getMetadatas` (walk superclasses), `decorate`, the `idToObj` / `objToId` maps, `getObjectFromId`,
@@ -266,6 +271,19 @@ as `src/reflection/` and re-exported from its root:
 The macro types are recognised by marker properties that only exist in the type system (`_typetorch_macro_generic`,
 `_typetorch_macro_many`, `_typetorch_macro_caller`, `_typetorch_macro_tuple_labels`, `_typetorch_decorator`,
 `_typetorch_parameters`). Flamework's `Modding` types are not recognised.
+
+## With the TypeTorch CLI
+
+The CLI doesn't configure the transformer; the game's `tsconfig.json` does (above). It does depend on its output:
+
+- `typetorch migrate --from flamework` (`tt` works as an alias) flags a tsconfig that still lists
+  `rbxts-transformer-flamework` (replace it with `rbxts-transform-debug`, then `@typetorch/transformer`) or lacks
+  `@typetorch/transformer`, and a `package.json` without the TypeTorch packages.
+- `typetorch build` hashes the arguments of every `createNetwork(...)` call in the compiled Luau (the guard trees this
+  transformer generates) into the payload's `ProtocolHash`, and warns about `createNetwork()` calls without generated
+  guards (the transformer missing from the plugins).
+- Prod builds compile with a generated tsconfig whose first plugin is the CLI's debug-macro stripper; the game's own
+  plugins, this transformer included, follow unchanged.
 
 ## Migrating from Flamework
 
@@ -303,10 +321,26 @@ leaf that takes a class fails with an error naming the leaf, and `src/shared/lea
 AnimationTrack, a function, a thread and a connection) compiles with one warning each, at the leaf. Then
 `test-project/scripts/runtime.luau` runs the model under
 [Lune](https://lune-org.github.io/docs) (pinned in `test-project/rokit.toml`): two generations in one emulated VM,
-each with a fresh `Reflect` registry, resolving DI ids and running the generated guards. 58 checks in all.
+each with a fresh `Reflect` registry, resolving DI ids and running the generated guards. Rojo and Lune must be
+on `PATH` (`rokit install` in `test-project/`).
 
 The package ships only `out/`, `README.md` and `LICENSE` (`bun pm pack --dry-run` lists them). `prepublishOnly`
 cleans and rebuilds `out/`.
+
+## Releasing
+
+Releases go to npm only from a version tag, through
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml) (the repo's only workflow; there is no CI on pushes or
+pull requests, so run `bun run test` locally):
+
+```sh
+npm version <x.y.z> -m "release %s" && git push origin main --follow-tags
+```
+
+The workflow checks that the tag matches `package.json` and that the version isn't on npm yet, then runs
+`npm publish --provenance` (which runs `prepublishOnly`) and creates a GitHub release with generated notes. It
+authenticates with npm trusted publishing (environment `npm`), falling back to an `NPM_TOKEN` secret until that is set
+up. A prerelease version (`x.y.z-next.0`) goes to the `next` dist-tag, anything else to `latest`.
 
 ## Credits and license
 
