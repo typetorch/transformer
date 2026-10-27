@@ -2,13 +2,16 @@
 
 # @typetorch/transformer
 
-The roblox-ts transformer behind [TypeTorch](https://github.com/typetorch). It does two things at compile time:
+The roblox-ts transformer behind [TypeTorch](https://github.com/typetorch). It does three things at compile time:
 
 1. **User macros.** A function tagged `@metadata macro` gets its omitted trailing parameters filled in from types:
    runtime `t` guards, stable type ids, call-site info. Nested and mapped types work, so `createNetwork<C2S, S2C>()`
    gets one guard per method of a nested interface.
 2. **Class metadata for dependency injection.** Classes decorated with a TypeTorch decorator get an `identifier`, their
    constructor's dependency ids (`typetorch:parameters`) and a `Reflect.decorate` call.
+3. **Debug and build-info macros.** `$print`, `$warn`, `$error`, `$assert`, `$dbg`, `$nameof`, `$file`, `$package`,
+   `$git` and `$compileTime` from `@typetorch/transformer/macros`: what `rbxts-transform-debug` did, in this
+   transformer, so a project needs one plugin (and one type check) instead of two. See [Debug macros](#debug-macros).
 
 It is a stripped-down fork of [rbxts-transformer-flamework](https://github.com/rbxts-flamework/transformer) (MIT), with
 the guard builder and macro engine kept as they are. TypeTorch projects don't depend on Flamework at all: the runtime
@@ -38,11 +41,7 @@ needed.
 		"experimentalDecorators": true,
 		// @typetorch must be a type root so roblox-ts accepts imports from @typetorch/framework.
 		"typeRoots": ["node_modules/@rbxts", "node_modules/@typetorch"],
-		"plugins": [
-			// rbxts-transform-debug stays first in every TypeTorch repo.
-			{ "transform": "rbxts-transform-debug", "environmentRequires": {} },
-			{ "transform": "@typetorch/transformer" }
-		]
+		"plugins": [{ "transform": "@typetorch/transformer" }]
 	}
 }
 ```
@@ -66,6 +65,7 @@ Passed in the plugin entry: `{ "transform": "@typetorch/transformer", "runtimeMo
 | `runtimeModule` | `"@typetorch/framework"` | Module generated code imports `Reflect` from (and `t`, see below). |
 | `runtimeReflectPath` | `"reflection/reflect"` | Only when the runtime package itself compiles with the transformer (package name equals `runtimeModule`; the test fixture's stand-in does, the real framework doesn't): the rootDir-relative file exporting `Reflect`. Generated code imports it relatively, since a package can't import itself by name. |
 | `guardModule` | automatic | Module generated guards import `t` from. By default `@rbxts/t` when the file resolves the same copy as the runtime package, otherwise `t` re-exported by `runtimeModule`. |
+| `debugMacros` | `true` | Whether `$print`, `$warn`, `$error`, `$assert` and `$dbg` compile their output and source positions in. `TYPETORCH_DEBUG_MACROS=0` in the environment turns them off whatever this says (the TypeTorch CLI sets it for prod builds). See [Debug macros](#debug-macros). |
 | `semanticDiagnostics` | `false` | Type-check every file before transforming it and skip files with errors. roblox-ts already checks the transformed program, so this only guards the transformer against ill-typed input, and it type-checks the project a second time (about 9 s of a 40 s cold build on a 400-file game). `noSemanticDiagnostics` is the deprecated inverse. |
 | `optimizations.guardGenerationDedupLimit` | off | Types used this many times inside one guard are hoisted into a local and reused. |
 
@@ -184,6 +184,41 @@ datatypes, Instances by class, arrays, tuples, Maps, Sets, plain objects/interfa
 `unknown`/`any`. Warnings don't stop the build; the leaf keeps its (loose) guard. Older transformers ignore the
 `network` key.
 
+## Debug macros
+
+```ts
+import { $print, $warn, $error, $assert, $dbg, $nameof, $file, $package, $git, $compileTime } from "@typetorch/transformer/macros";
+```
+
+The transformer expands every call and drops the import (nothing in `macros.d.ts` exists at runtime), so the module
+never reaches roblox-ts. The names and output are those of
+[rbxts-transform-debug](https://github.com/roblox-aurora/rbxts-transform-debug) 2.2, which TypeTorch projects used
+before; calls through that package's own declarations are expanded too, so a project can remove the
+`rbxts-transform-debug` plugin from its tsconfig first and rewrite the imports later (then remove the package). Not
+carried over: `$dbg`'s custom handler and `$keysof` (unimplemented upstream).
+
+| Macro | Compiles to |
+|---|---|
+| `$print(...)`, `$warn(...)` | `print("[src/file.ts:12]", ...)`, `warn(...)` likewise |
+| `$error(message, level?)` | `error("[src/file.ts:12] " .. message, level)` |
+| `$assert(condition, message?)` | `assert(condition, "[src/file.ts:12] <condition text>: " .. message)` (message defaults to `Assertion failed!`) |
+| `$dbg(x)` | as a statement `print("[src/file.ts:12] x =", x)`; as an expression an IIFE that prints and returns `x` |
+| `$nameof<T>()`, `$nameof(a.b)` | `"T"`, `"b"` (an identifier, a property name, a string, or `this` inside a class) |
+| `$file.filePath`, `$file.lineNumber`, `$file` | the file's path relative to the project (forward slashes), the line, or both as an object |
+| `$package.version`, `$package` | a field of the project's `package.json` as a literal, or the whole file |
+| `$git()`, `$git("Branch", "Commit")` | an object literal: `Branch`, `Commit` (7 characters), `CommitHash`, `LatestTag`, `ISODate` and `Timestamp` (author date, seconds), or the named fields. Read with the `git` CLI once per compile; `""` without a repository. `$git().Branch` compiles only that field. |
+| `$compileTime()`, `$compileTime("DateTime" \| "UnixTimestampMillis" \| "ISO-8601")` | the compile time: unix seconds by default, else `DateTime.fromIsoDate("...")!`, milliseconds or an ISO string |
+
+The first five are the debug macros. With `debugMacros: false` in the plugin options, or `TYPETORCH_DEBUG_MACROS=0`
+in the environment, `$print`/`$warn`/`$dbg` compile to nothing (a `$print` statement vanishes, an expression is
+`undefined`, `$dbg(x)` is `x`) and `$assert`/`$error` to the plain call without the source position, so no debug
+output or source path reaches a prod payload. The CLI sets the variable for prod-channel builds (`"0"`) and dev builds
+(`"1"`). rbxtsc's incremental build doesn't see the environment, so switch it only with a clean `out/` (the CLI builds
+prod from a clean, per-channel cache). `$git`, `$compileTime`, `$nameof`, `$file` and `$package` always expand.
+
+A declaration opts in with the JSDoc tag `@typetorchMacro <name>`, which is how `macros.d.ts` is written; another
+package can declare (or re-export) the same macros with the same tags.
+
 ## Class metadata
 
 Decorators made with `Modding.createDecorator` or `Modding.createMetaDecorator` are TypeTorch decorators. The
@@ -277,13 +312,14 @@ The macro types are recognised by marker properties that only exist in the type 
 The CLI doesn't configure the transformer; the game's `tsconfig.json` does (above). It does depend on its output:
 
 - `typetorch migrate --from flamework` (`tt` works as an alias) flags a tsconfig that still lists
-  `rbxts-transformer-flamework` (replace it with `rbxts-transform-debug`, then `@typetorch/transformer`) or lacks
+  `rbxts-transformer-flamework` (replace it with `@typetorch/transformer`) or lacks
   `@typetorch/transformer`, and a `package.json` without the TypeTorch packages.
 - `typetorch build` hashes the arguments of every `createNetwork(...)` call in the compiled Luau (the guard trees this
   transformer generates) into the payload's `ProtocolHash`, and warns about `createNetwork()` calls without generated
   guards (the transformer missing from the plugins).
-- Prod builds compile with a generated tsconfig whose first plugin is the CLI's debug-macro stripper; the game's own
-  plugins, this transformer included, follow unchanged.
+- Prod builds compile with `TYPETORCH_DEBUG_MACROS=0` (and a generated tsconfig whose first plugin strips
+  `rbxts-transform-debug`'s macros, for projects still on it); this transformer strips its own debug macros from the
+  variable.
 
 ## Migrating from Flamework
 
@@ -316,7 +352,9 @@ and `Controller` in `decorators.ts`, an abstract `Module` base, `createNetwork` 
 `net/types.ts`, a decorated class; built as a package with this transformer), and a Model project that uses it. It
 builds the model with Rojo and checks the emitted Luau: a guard per nested leaf, the id strings, `typetorch:parameters`
 (also on derived classes and classes without a constructor), the `Reflect` import, the `t` re-export, and that a
-package declaration has the same id in both compiles. It also checks the network leaf diagnostics: a compile with a
+package declaration has the same id in both compiles, and the debug macros (`src/shared/debug-macros.ts`): their
+output with the macros on, and a second compile with `TYPETORCH_DEBUG_MACROS=0` that strips them. It also checks the
+network leaf diagnostics: a compile with a
 leaf that takes a class fails with an error naming the leaf, and `src/shared/leaf-warnings.ts` (a generic leaf, an
 AnimationTrack, a function, a thread and a connection) compiles with one warning each, at the leaf. Then
 `test-project/scripts/runtime.luau` runs the model under
@@ -324,7 +362,7 @@ AnimationTrack, a function, a thread and a connection) compiles with one warning
 each with a fresh `Reflect` registry, resolving DI ids and running the generated guards. Rojo and Lune must be
 on `PATH` (`rokit install` in `test-project/`).
 
-The package ships only `out/`, `README.md` and `LICENSE` (`bun pm pack --dry-run` lists them). `prepublishOnly`
+The package ships only `out/`, `macros.d.ts`, `README.md` and `LICENSE` (`bun pm pack --dry-run` lists them). `prepublishOnly`
 cleans and rebuilds `out/`.
 
 ## Releasing
