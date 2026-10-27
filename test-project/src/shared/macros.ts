@@ -1,5 +1,5 @@
 import { Modding } from "@typetorch/framework";
-import { $assert } from "rbxts-transform-debug";
+import { $assert } from "@typetorch/transformer/macros";
 
 /**
  * Macros declared in the game itself (the other case is createNetwork, declared in a package).
