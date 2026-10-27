@@ -1,3 +1,4 @@
+// Header comment: stays at the top when the macro import below it is dropped.
 import { $assert, $compileTime, $dbg, $error, $file, $git, $nameof, $package, $print, $warn, type GitInfo } from "@typetorch/transformer/macros";
 
 /** Every built-in macro once, so the emitted Luau can be checked (and, for prod, that they are stripped). */
