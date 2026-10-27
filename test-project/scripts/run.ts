@@ -273,18 +273,19 @@ check("caller macro fills line and text", /here\(\d+, "here\(\)"\)/.test(service
 step("check the built-in macros (debug macros on)");
 const macros = read(join(out, "shared", "macros.luau"));
 const debugOn = read(join(out, "shared", "debug-macros.luau"));
-check("$print carries the source position", debugOn.includes('print("[src/shared/debug-macros.ts:5]", "print", value)'), excerpt(debugOn, /print\("\[/));
-check("$warn carries the source position", debugOn.includes('warn("[src/shared/debug-macros.ts:6]", "warn", value)'), excerpt(debugOn, /warn\("\[/));
+check("a dropped macro import keeps the file's header comment above the next statement", /^-- Header comment: stays at the top/m.test(debugOn) && debugOn.indexOf("Header comment") < debugOn.indexOf("local function debugMacros"), excerpt(debugOn, /Header comment/));
+check("$print carries the source position", debugOn.includes('print("[src/shared/debug-macros.ts:6]", "print", value)'), excerpt(debugOn, /print\("\[/));
+check("$warn carries the source position", debugOn.includes('warn("[src/shared/debug-macros.ts:7]", "warn", value)'), excerpt(debugOn, /warn\("\[/));
 check("$git(\"Branch\", \"Commit\") is an object literal with those fields", /local git = \{\s*Branch = "[^"]*",\s*Commit = "[0-9a-f]{0,7}",?\s*\}/.test(debugOn), excerpt(debugOn, /local git = /, 4));
 check("$git() has every field", /Timestamp = \d+/.test(debugOn) && /CommitHash = "[0-9a-f]{0,40}"/.test(debugOn) && /ISODate = "/.test(debugOn), excerpt(debugOn, /local full = /, 8));
 check("$compileTime() is a number, $compileTime(\"ISO-8601\") a string", /local built = \d{10}\b/.test(debugOn) && /local iso = "\d{4}-\d\d-\d\dT/.test(debugOn), excerpt(debugOn, /local built = /, 2));
-check("$dbg(x) as an expression prints the text and value and yields the value", /local doubled = \(function\(\)[\s\S]*print\("\[src\/shared\/debug-macros\.ts:12\] value \* 2 =", value[\s\S]*return value/.test(debugOn), excerpt(debugOn, /local doubled = /, 5));
-check("$dbg(x) as a statement prints", debugOn.includes('print("[src/shared/debug-macros.ts:13] doubled =", doubled)'), excerpt(debugOn, /doubled =", doubled/));
-check("$assert with a message", debugOn.includes('"[src/shared/debug-macros.ts:14] value > 0: value must be positive"') && /assert\((_arg0|value > 0), "\[src/.test(debugOn), excerpt(debugOn, /value > 0: /));
-check("$assert without a message", debugOn.includes('"[src/shared/debug-macros.ts:15] doubled > 0: Assertion failed!")'), excerpt(debugOn, /doubled > 0: /));
-check("$error carries the source position and the level", debugOn.includes('error("[src/shared/debug-macros.ts:16] negative", 2)'), excerpt(debugOn, /error\(/));
+check("$dbg(x) as an expression prints the text and value and yields the value", /local doubled = \(function\(\)[\s\S]*print\("\[src\/shared\/debug-macros\.ts:13\] value \* 2 =", value[\s\S]*return value/.test(debugOn), excerpt(debugOn, /local doubled = /, 5));
+check("$dbg(x) as a statement prints", debugOn.includes('print("[src/shared/debug-macros.ts:14] doubled =", doubled)'), excerpt(debugOn, /doubled =", doubled/));
+check("$assert with a message", debugOn.includes('"[src/shared/debug-macros.ts:15] value > 0: value must be positive"') && /assert\((_arg0|value > 0), "\[src/.test(debugOn), excerpt(debugOn, /value > 0: /));
+check("$assert without a message", debugOn.includes('"[src/shared/debug-macros.ts:16] doubled > 0: Assertion failed!")'), excerpt(debugOn, /doubled > 0: /));
+check("$error carries the source position and the level", debugOn.includes('error("[src/shared/debug-macros.ts:17] negative", 2)'), excerpt(debugOn, /error\(/));
 check("$nameof<T>() and $nameof(x.y)", debugOn.includes('local name = "GitInfo"') && debugOn.includes('local field = "Branch"'), excerpt(debugOn, /local name = /, 2));
-check("$file.lineNumber and $file", debugOn.includes("local line = 19") && /local where = \{\s*filePath = "src\/shared\/debug-macros\.ts",\s*lineNumber = 20,?\s*\}/.test(debugOn), excerpt(debugOn, /local line = /, 5));
+check("$file.lineNumber and $file", debugOn.includes("local line = 20") && /local where = \{\s*filePath = "src\/shared\/debug-macros\.ts",\s*lineNumber = 21,?\s*\}/.test(debugOn), excerpt(debugOn, /local line = /, 5));
 check("$package.version is the fixture's version", debugOn.includes('local version = "0.0.0"'), excerpt(debugOn, /local version = /));
 check("no import of the macro module remains", !/TS\.import\(.*"transformer"/.test(debugOn) && !/TS\.import\(.*"transformer"/.test(macros) && !/TS\.import\(.*"transformer"/.test(client), excerpt(debugOn, /TS\.import/));
 check("$assert in a user macro keeps the position", macros.includes('"[src/shared/macros.ts:10] id: id macro was not filled in by the transformer"'), excerpt(macros, /macros\.ts:10/));
@@ -302,7 +303,7 @@ check("$print and $warn statements are gone", !/\bprint\(/.test(debugOff) && !/\
 check("$dbg(x) is x; a $dbg statement vanishes", debugOff.includes("local doubled = value * 2") && !/doubled =", doubled/.test(debugOff), excerpt(debugOff, /local doubled = /));
 check("$assert is a plain assert", /assert\(_arg0, "value must be positive"\)|assert\(value > 0, "value must be positive"\)/.test(debugOff) && /assert\(_arg0_1\)|assert\(doubled > 0\)/.test(debugOff), excerpt(debugOff, /assert\(/, 2));
 check("$error is a plain error", debugOff.includes('error("negative", 2)'), excerpt(debugOff, /error\(/));
-check("$git, $compileTime, $nameof, $file and $package still expand", /Commit = "/.test(debugOff) && /local built = \d{10}\b/.test(debugOff) && debugOff.includes('local name = "GitInfo"') && debugOff.includes("local line = 19") && debugOff.includes('local version = "0.0.0"'), excerpt(debugOff, /local built = /));
+check("$git, $compileTime, $nameof, $file and $package still expand", /Commit = "/.test(debugOff) && /local built = \d{10}\b/.test(debugOff) && debugOff.includes('local name = "GitInfo"') && debugOff.includes("local line = 20") && debugOff.includes('local version = "0.0.0"'), excerpt(debugOff, /local built = /));
 check("a user macro's $assert is a plain assert", /assert\(_id ~= "" and _id, "id macro was not filled in by the transformer"\)/.test(macrosOff), excerpt(macrosOff, /assert\(_id/));
 
 step("compile the fixture again with the debug macros on (for Rojo and Lune)");
