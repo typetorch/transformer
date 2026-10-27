@@ -1,5 +1,6 @@
 {
 	"name": "typetorch-transformer-fixture",
+	"version": "0.0.0",
 	"private": true,
 	"description": "Fixture for @typetorch/transformer: a roblox-ts Model project (like a TypeTorch payload) compiled with the transformer and a stand-in @typetorch/framework. Run `bun run fixture` (see scripts/run.ts).",
 	"scripts": {
@@ -12,8 +13,7 @@
 		"typescript": "5.5.3"
 	},
 	"dependencies": {
-		"@rbxts/t": "^3.2.1",
-		"rbxts-transform-debug": "2.2.0"
+		"@rbxts/t": "^3.2.1"
 	},
 	"overrides": {
 		"typescript": "5.5.3"
