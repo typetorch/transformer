@@ -26,9 +26,15 @@ const PACKAGE_REGEX = /^@[a-z0-9-]*\//;
  */
 export interface TransformerConfig {
 	/**
-	 * Disables TypeScript's own semantic diagnostics.
-	 * Improves performance, but results in increased risk of incorrect compilation as well as messed up diagnostic spans.
+	 * Runs TypeScript's semantic check on every file before transforming it and skips files with errors.
+	 *
+	 * Off by default: roblox-ts already type-checks the transformed program and reports its diagnostics, so this
+	 * check only protects the transformer from running on ill-typed code, at the cost of type-checking the whole
+	 * project a second time (about a quarter of a cold build).
 	 */
+	semanticDiagnostics?: boolean;
+
+	/** @deprecated Semantic diagnostics are off by default now; use `semanticDiagnostics: true` to turn them on. */
 	noSemanticDiagnostics?: boolean;
 
 	/**
@@ -70,6 +76,9 @@ export class TransformState {
 	public rootDirs = this.options.rootDirs ? this.options.rootDirs : [this.srcDir];
 	public typeChecker = this.program.getTypeChecker();
 
+	/** Whether each file is semantically checked before it is transformed (see `TransformerConfig`). */
+	public readonly semanticDiagnostics: boolean;
+
 	public pathTranslator: PathTranslator;
 
 	/** The directory holding the project's package.json */
@@ -106,6 +115,8 @@ export class TransformState {
 
 		this.runtimeModule = config.runtimeModule ?? DEFAULT_RUNTIME_MODULE;
 		this.isRuntimePackage = this.packageName === this.runtimeModule;
+		// The deprecated `noSemanticDiagnostics: false` used to mean "check"; keep honoring it when set explicitly.
+		this.semanticDiagnostics = config.semanticDiagnostics ?? (config.noSemanticDiagnostics === false);
 	}
 
 	/** The prefix for ids of this project's own declarations (`<prefix>:<path>@<name>`), if any. */

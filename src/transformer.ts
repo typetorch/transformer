@@ -21,7 +21,10 @@ export default function (program: ts.Program, config?: TransformerConfig) {
 				emitTypescriptMismatch(state, "Failed to load! TS version mismatch detected");
 			}
 
-			if (state.config.noSemanticDiagnostics !== true) {
+			// roblox-ts type-checks the transformed program and reports its diagnostics (with the original spans when the
+			// original file has errors), so checking every file here again doubles the type-check time of the whole
+			// build. Only do it when asked.
+			if (state.semanticDiagnostics) {
 				const originalFile = ts.getParseTreeNode(file, ts.isSourceFile);
 				if (originalFile) {
 					const preEmitDiagnostics = ts.getPreEmitDiagnostics(program, originalFile);

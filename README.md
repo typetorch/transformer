@@ -66,7 +66,7 @@ Passed in the plugin entry: `{ "transform": "@typetorch/transformer", "runtimeMo
 | `runtimeModule` | `"@typetorch/framework"` | Module generated code imports `Reflect` from (and `t`, see below). |
 | `runtimeReflectPath` | `"reflection/reflect"` | Only when the runtime package itself compiles with the transformer (package name equals `runtimeModule`; the test fixture's stand-in does, the real framework doesn't): the rootDir-relative file exporting `Reflect`. Generated code imports it relatively, since a package can't import itself by name. |
 | `guardModule` | automatic | Module generated guards import `t` from. By default `@rbxts/t` when the file resolves the same copy as the runtime package, otherwise `t` re-exported by `runtimeModule`. |
-| `noSemanticDiagnostics` | `false` | Skip TypeScript's semantic checks before transforming each file. Faster, riskier. |
+| `semanticDiagnostics` | `false` | Type-check every file before transforming it and skip files with errors. roblox-ts already checks the transformed program, so this only guards the transformer against ill-typed input, and it type-checks the project a second time (about 9 s of a 40 s cold build on a 400-file game). `noSemanticDiagnostics` is the deprecated inverse. |
 | `optimizations.guardGenerationDedupLimit` | off | Types used this many times inside one guard are hoisted into a local and reused. |
 
 When the transformer resolves a different `typescript` than roblox-ts (for example when it is linked), its
