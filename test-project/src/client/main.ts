@@ -1,5 +1,5 @@
 import { Controller, Module, Reflect, type OnStart } from "@typetorch/framework";
-import { $print } from "rbxts-transform-debug";
+import { $print } from "@typetorch/transformer/macros";
 import { network } from "../shared/network";
 
 /** Extends the package's abstract base and declares no constructor: an identifier, no dependency ids. */

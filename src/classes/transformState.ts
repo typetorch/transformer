@@ -10,6 +10,8 @@ import { PathTranslator } from "./pathTranslator";
 import { assert } from "../util/functions/assert";
 import { tryResolveTS } from "../util/functions/tryResolveTS";
 import { Diagnostics } from "./diagnostics";
+import { GitInfo, readGitInfo } from "../util/functions/gitInfo";
+import { Logger } from "./logger";
 
 /** The package generated code imports the runtime (`Reflect`, and `t` as a fallback) from. */
 export const DEFAULT_RUNTIME_MODULE = "@typetorch/framework";
@@ -36,6 +38,15 @@ export interface TransformerConfig {
 
 	/** @deprecated Semantic diagnostics are off by default now; use `semanticDiagnostics: true` to turn them on. */
 	noSemanticDiagnostics?: boolean;
+
+	/**
+	 * Whether the debug macros (`$print`, `$warn`, `$error`, `$assert`, `$dbg` from `@typetorch/transformer/macros`)
+	 * compile their output and source positions in. On by default; TYPETORCH_DEBUG_MACROS=0 in the environment (set
+	 * by the TypeTorch CLI for prod-channel builds) turns them off whatever this says. Off, `$print`/`$warn`/`$dbg`
+	 * compile to nothing and `$assert`/`$error` to the plain call. rbxtsc's incremental build does not see the
+	 * environment: compile into a clean `out/` when switching (the CLI does).
+	 */
+	debugMacros?: boolean;
 
 	/**
 	 * The module generated code imports `Reflect` from (and `t`, when `@rbxts/t` can't be imported directly).
@@ -94,7 +105,16 @@ export class TransformState {
 	public runtimeModule: string;
 	public isRuntimePackage: boolean;
 
+	/** Whether the debug macros emit (see `TransformerConfig.debugMacros`). */
+	public readonly debugMacros: boolean;
+
 	public isUserMacroCache = new Map<ts.Symbol, boolean>();
+	/** Symbol -> the built-in macro it declares (null: none). */
+	public macroCache = new Map<ts.Symbol, import("../transformations/macros/debugMacros").MacroName | null>();
+	/** File name -> whether the file declares built-in macros. */
+	public macroFileCache = new Map<string, boolean>();
+	private gitInfo?: GitInfo;
+	private packageJsonFields?: Record<string, unknown>;
 	private guardLibraryPath?: string;
 
 	constructor(
@@ -117,6 +137,24 @@ export class TransformState {
 		this.isRuntimePackage = this.packageName === this.runtimeModule;
 		// The deprecated `noSemanticDiagnostics: false` used to mean "check"; keep honoring it when set explicitly.
 		this.semanticDiagnostics = config.semanticDiagnostics ?? (config.noSemanticDiagnostics === false);
+		this.debugMacros = config.debugMacros !== false && process.env.TYPETORCH_DEBUG_MACROS !== "0";
+		if (Logger.verbose && !this.debugMacros) {
+			Logger.writeLine("debug macros off: $print/$warn/$dbg compile to nothing, $assert/$error without the source position");
+		}
+	}
+
+	/** The project's git state, read once per compile (so watch mode sees new commits). */
+	getGitInfo(): GitInfo {
+		return (this.gitInfo ??= readGitInfo(this.rootDirectory));
+	}
+
+	/** The project's package.json, every field (for `$package`). */
+	getPackageJson(): Record<string, unknown> {
+		if (!this.packageJsonFields) {
+			const text = ts.sys.readFile(getPackageJson(this.currentDirectory).path);
+			this.packageJsonFields = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+		}
+		return this.packageJsonFields;
 	}
 
 	/** The prefix for ids of this project's own declarations (`<prefix>:<path>@<name>`), if any. */

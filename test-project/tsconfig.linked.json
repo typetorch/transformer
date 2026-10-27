@@ -20,13 +20,7 @@
 		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
 		// Same as tsconfig.json, but loads the transformer straight from ../out, where `typescript` resolves to the
 		// transformer's own copy: exercises the require hook that redirects it to roblox-ts' TypeScript.
-		"plugins": [
-			{
-				"transform": "rbxts-transform-debug",
-				"environmentRequires": {}
-			},
-			{ "transform": "../out/index.js" }
-		]
+		"plugins": [{ "transform": "../out/index.js" }]
 	},
 	"include": ["./src/**/*.ts"]
 }

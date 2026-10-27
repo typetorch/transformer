@@ -1,5 +1,5 @@
 import { FrameworkLogger, Reflect, Service, registered, type Lazy } from "@typetorch/framework";
-import { $print } from "rbxts-transform-debug";
+import { $print } from "@typetorch/transformer/macros";
 import { argNames, describe, guardOf, here, idOf } from "../shared/macros";
 import { network, Payload } from "../shared/network";
 
