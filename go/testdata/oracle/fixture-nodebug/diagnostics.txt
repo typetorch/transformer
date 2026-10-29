@@ -1,0 +1,5 @@
+src/shared/leaf-warnings.ts:10:3+99: warning: Network leaf "carry.notify" has a generic or conditional signature: its guard checks T as Model | undefined (and a conditional type as either branch), so it can't enforce how the arguments go together. Declare a union of tuples instead, e.g. `(...args: [box: Model, group: string] | [box: undefined]) => void`, or use separate leaves.
+src/shared/leaf-warnings.ts:14:3+57: warning: Network leaf "patches.looped", parameter "track": an AnimationTrack doesn't replicate (it arrives as nil): send the Animation or its AnimationId and load the track on the other side.
+src/shared/leaf-warnings.ts:16:3+86: warning: Network leaf "patches.later", parameter "done": a function can't be sent over the network (it arrives as nil).
+src/shared/leaf-warnings.ts:16:3+86: warning: Network leaf "patches.later", parameter "options".co: a thread can't be sent over the network (it arrives as nil).
+src/shared/leaf-warnings.ts:16:3+86: warning: Network leaf "patches.later", parameter "options".conn: an RBXScriptConnection can't be sent over the network (it arrives as nil).
