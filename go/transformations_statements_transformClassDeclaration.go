@@ -352,15 +352,8 @@ func addSectionComment(state *TransformState, node *ts.Node, declaration *ts.Nod
 	ts.AddSyntheticLeadingComment(state.f.ec, node, ts.KindSingleLineCommentTrivia, " (TypeTorch) "+elementName+" "+label)
 }
 
-// NodeBuilderFlags pkg/goblox doesn't re-export yet (REQUESTS.md): typescript-go's nodebuilder.FlagsInTypeAlias and
-// FlagsIgnoreErrors.
-const (
-	nodeBuilderFlagsInTypeAlias  ts.NodeBuilderFlags = 1 << 23
-	nodeBuilderFlagsIgnoreErrors ts.NodeBuilderFlags = 1<<15 | 1<<16 | 1<<17 | 1<<18 | 1<<19 | 1<<21 | 1<<26
-)
-
 func formatType(state *TransformState, t *ts.Type) string {
-	typeNode := state.typeChecker.TypeToTypeNode(t, nil, nodeBuilderFlagsInTypeAlias|nodeBuilderFlagsIgnoreErrors, nil)
+	typeNode := state.typeChecker.TypeToTypeNode(t, nil, ts.NodeBuilderFlagsInTypeAlias|ts.NodeBuilderFlagsIgnoreErrors, nil)
 	if typeNode == nil {
 		return state.typeChecker.TypeToString(t)
 	}

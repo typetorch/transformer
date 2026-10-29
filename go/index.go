@@ -9,37 +9,28 @@
 // for what is ported.
 //
 // This file stands for src/index.ts, the package entry point. The TypeScript one installs a require hook so the
-// transformer uses roblox-ts' copy of TypeScript; goblox has one TypeScript, built in, so here it holds what a host
-// needs to load the plugin from a tsconfig entry instead.
+// transformer uses roblox-ts' copy of TypeScript; goblox has one TypeScript, built in. Here the package registers
+// itself with goblox instead, so importing it is enough for goblox to run it wherever a tsconfig lists
+// `{ "transform": "@typetorch/transformer" }`.
 package transformer
 
 import (
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // Name is the plugin's package name, as in a tsconfig plugin entry (`{ "transform": "@typetorch/transformer" }`).
 const Name = "@typetorch/transformer"
 
+func init() {
+	ts.RegisterPlugin(Name, func(entry map[string]any) (ts.Plugin, error) {
+		return New(ConfigFromPluginEntry(entry)), nil
+	})
+}
+
 // ConfigFromProgram reads the options of the `{ "transform": "@typetorch/transformer" }` entry in the program's
-// tsconfig `compilerOptions.plugins` (false when there is none). Only the tsconfig itself is read, not the configs it
-// extends: pkg/goblox doesn't expose the merged plugin entries yet (REQUESTS.md).
+// tsconfig `compilerOptions.plugins` (false when there is none).
 func ConfigFromProgram(program *ts.Program) (TransformerConfig, bool) {
-	// typescript-go's ordered JSON objects marshal with its own options (internal/json).
-	data, err := json.Marshal(program.CommandLine().Raw, jsontext.AllowInvalidUTF8(true))
-	if err != nil {
-		return TransformerConfig{}, false
-	}
-	var raw struct {
-		CompilerOptions struct {
-			Plugins []map[string]any `json:"plugins"`
-		} `json:"compilerOptions"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return TransformerConfig{}, false
-	}
-	for _, entry := range raw.CompilerOptions.Plugins {
+	for _, entry := range ts.PluginEntries(program) {
 		if entry["transform"] == Name {
 			return ConfigFromPluginEntry(entry), true
 		}
