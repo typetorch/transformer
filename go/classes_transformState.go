@@ -26,9 +26,9 @@ const DefaultRuntimeReflectPath = "reflection/reflect"
 // packageRegex: roblox-ts treats a project whose package name matches this as a package (see createProjectData).
 var packageRegex = regexp.MustCompile(`^@[a-z0-9-]*/`)
 
-// Config holds the options from the plugin entry in tsconfig.json:
+// TransformerConfig holds the options from the plugin entry in tsconfig.json:
 // `{ "transform": "@typetorch/transformer", ...options }`. Field names and JSON keys are the TypeScript ones.
-type Config struct {
+type TransformerConfig struct {
 	// SemanticDiagnostics runs TypeScript's semantic check on every file before transforming it and skips files with
 	// errors.
 	//
@@ -118,7 +118,7 @@ type TransformState struct {
 	rootDirs          []string
 	typeChecker       *ts.Checker
 
-	// semanticDiagnostics is whether each file is semantically checked before it is transformed (see Config).
+	// semanticDiagnostics is whether each file is semantically checked before it is transformed (see TransformerConfig).
 	semanticDiagnostics bool
 
 	pathTranslator *pathTranslator
@@ -134,7 +134,7 @@ type TransformState struct {
 	runtimeModule    string
 	isRuntimePackage bool
 
-	// debugMacros is whether the debug macros emit (see Config.DebugMacros).
+	// debugMacros is whether the debug macros emit (see TransformerConfig.DebugMacros).
 	debugMacros bool
 
 	isUserMacroCache map[*ts.Symbol]bool
@@ -149,7 +149,7 @@ type TransformState struct {
 
 	program     *ts.Program
 	context     *ts.TransformContext
-	config      Config
+	config      TransformerConfig
 	f           *factory
 	visitor     *ts.NodeVisitor
 	diagnostics *diagnostics
@@ -159,7 +159,7 @@ type TransformState struct {
 	prereqStack [][]*ts.Node
 }
 
-func newTransformState(program *ts.Program, context *ts.TransformContext, config Config) *TransformState {
+func newTransformState(program *ts.Program, context *ts.TransformContext, config TransformerConfig) *TransformState {
 	tsconfigPath := path.Join(context.CurrentDirectory, "tsconfig.json")
 	state := &TransformState{
 		parsedCommandLine: commandLine{tsconfigPath: tsconfigPath, project: context.CurrentDirectory, projectType: context.ProjectType},
