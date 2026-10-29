@@ -3,7 +3,6 @@ package transformer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,25 +75,13 @@ func formatDiagnostic(projectDir string, diagnostic *ts.Diagnostic, indent strin
 	return out
 }
 
-// runFixture transforms a fixture project and returns its printed files (keyed by path relative to rootDir) and
-// diagnostics, formatted like testdata/oracle.cjs does.
-func runFixture(t *testing.T, c fixtureCase) (map[string]string, string) {
+// runProject transforms a project through goblox (LoadProgram, RunPlugins) and returns its printed files (keyed by
+// path relative to rootDir) and diagnostics, formatted like testdata/oracle.cjs does.
+func runProject(t *testing.T, c fixtureCase) (map[string]string, string) {
 	t.Helper()
 	directory, err := filepath.Abs(c.project)
 	if err != nil {
 		t.Fatal(err)
-	}
-	// The fixtures need their packages (@rbxts types, the packed stand-in @typetorch/framework, the runtime kit
-	// copied into the stand-in): without them nothing resolves and the output differs everywhere.
-	for _, required := range []string{
-		"../test-project/node_modules/@rbxts/types",
-		"../test-project/node_modules/@typetorch/framework",
-		"../test-project/framework-standin/node_modules/@rbxts/types",
-		"../test-project/framework-standin/src/reflection",
-	} {
-		if _, err := os.Stat(required); err != nil {
-			t.Fatalf("%s is missing: run `bun install` and `bun run test` in the repository root once to set up the fixtures", required)
-		}
 	}
 	directory = ts.NormalizePath(directory)
 	program, errs := ts.LoadProgram(ts.LoadOptions{Project: directory, CurrentDirectory: directory, Checkers: 1})
@@ -108,20 +95,9 @@ func runFixture(t *testing.T, c fixtureCase) (map[string]string, string) {
 	}
 	config.Hooks = fixedHooks(c.env)
 
-	// The fixtures don't list `types`: TypeScript 5 then includes every package of the type roots (@rbxts/types,
-	// @rbxts/compiler-types), TypeScript 7 none. Until goblox's LoadProgram does what TypeScript 5 did (REQUESTS.md),
-	// load the fixture through a tsconfig that extends it and lists them.
-	if program.Options().Types == nil {
-		tsconfig := filepath.Join(t.TempDir(), "tsconfig.json")
-		types, _ := json.Marshal(automaticTypeDirectiveNames(program.Options().TypeRoots))
-		text := fmt.Sprintf(`{ "extends": %q, "compilerOptions": { "types": %s } }`, directory+"/tsconfig.json", types)
-		if err := os.WriteFile(tsconfig, []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		program, errs = ts.LoadProgram(ts.LoadOptions{Project: tsconfig, CurrentDirectory: directory, Checkers: 1})
-		if program == nil {
-			t.Fatalf("LoadProgram: %v", errs)
-		}
+	// What the goblox binary does: the registry makes this plugin from the same tsconfig entry.
+	if plugins, errs := ts.PluginsForProgram(program); len(errs) > 0 || len(plugins) != 1 || plugins[0].Name() != Name {
+		t.Errorf("PluginsForProgram: %v plugins, errors %v", len(plugins), errs)
 	}
 
 	// Every source file under rootDir, like the oracle (and roblox-ts).
@@ -150,19 +126,22 @@ func runFixture(t *testing.T, c fixtureCase) (map[string]string, string) {
 		files[relativePath(rootDir, file.FileName())] = text
 	}
 
-	// What the transformer emits is type-checked again (roblox-ts compiles the re-parsed program).
-	for name := range result.Transformed {
-		file := result.Program.GetSourceFile(name)
+	// What the transformer emits is type-checked again (roblox-ts compiles the re-parsed program): it must not add
+	// type errors to the file.
+	errorsOf := func(program *ts.Program, name string) []*ts.Diagnostic {
 		var errors []*ts.Diagnostic
-		for _, diagnostic := range ts.GetPreEmitDiagnostics(ctx, result.Program, file) {
-			if diagnostic.Category() == ts.CategoryError {
+		for _, diagnostic := range ts.GetPreEmitDiagnostics(ctx, program, program.GetSourceFile(name)) {
+			if diagnostic.Category() == ts.CategoryError && diagnostic.File() != nil {
 				errors = append(errors, diagnostic)
 			}
 		}
-		if len(errors) > 0 {
+		return errors
+	}
+	for name := range result.Transformed {
+		if errors := errorsOf(result.Program, name); len(errors) > len(errorsOf(program, name)) {
 			var text strings.Builder
 			ts.WriteDiagnostics(&text, errors, directory)
-			t.Errorf("%s: the transformed file has type errors:\n%s\n--- transformed\n%s", name, text.String(), result.Transformed[name])
+			t.Errorf("%s: the transformed file has type errors the original doesn't:\n%s\n--- transformed\n%s", name, text.String(), result.Transformed[name])
 		}
 	}
 
@@ -173,9 +152,9 @@ func runFixture(t *testing.T, c fixtureCase) (map[string]string, string) {
 	return files, text.String()
 }
 
-func readOracle(t *testing.T, name string) (map[string]string, string) {
+// readOracle reads what testdata/oracle.cjs wrote to root.
+func readOracle(t *testing.T, root string) (map[string]string, string) {
 	t.Helper()
-	root := filepath.Join("testdata", "oracle", name)
 	files := map[string]string{}
 	var diagnostics string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -202,42 +181,71 @@ func readOracle(t *testing.T, name string) (map[string]string, string) {
 	return files, diagnostics
 }
 
+// compareWithOracle runs the case and compares it with the oracle's output in oracleDir. With GOBLOX_ACTUAL_DIR set,
+// the Go output is written there too, in the oracle's layout.
+func compareWithOracle(t *testing.T, c fixtureCase, oracleDir string) {
+	files, diagnostics := runProject(t, c)
+	expectedFiles, expectedDiagnostics := readOracle(t, oracleDir)
+
+	if actualDir := os.Getenv("GOBLOX_ACTUAL_DIR"); actualDir != "" {
+		for name, text := range files {
+			target := filepath.Join(actualDir, c.name, name)
+			_ = os.MkdirAll(filepath.Dir(target), 0o755)
+			_ = os.WriteFile(target, []byte(text), 0o644)
+		}
+		_ = os.WriteFile(filepath.Join(actualDir, c.name, "diagnostics.txt"), []byte(diagnostics), 0o644)
+	}
+
+	for name, expected := range expectedFiles {
+		actual, ok := files[name]
+		if !ok {
+			t.Errorf("%s: not transformed", name)
+			continue
+		}
+		if normalize(actual) != applyDivergences(c.name+"/"+name, normalize(expected)) {
+			t.Errorf("%s differs from the TS transformer's output:\n--- TS\n%s\n--- Go\n%s", name, expected, actual)
+		}
+	}
+	for name := range files {
+		if _, ok := expectedFiles[name]; !ok {
+			t.Errorf("%s: transformed, but not by the TS transformer", name)
+		}
+	}
+	if diagnostics != expectedDiagnostics {
+		t.Errorf("diagnostics differ:\n--- TS\n%s--- Go\n%s", expectedDiagnostics, diagnostics)
+	}
+}
+
 func TestFixtures(t *testing.T) {
-	actualDir := os.Getenv("GOBLOX_ACTUAL_DIR")
+	// The fixtures need their packages (@rbxts types, the packed stand-in @typetorch/framework, the runtime kit
+	// copied into the stand-in): without them nothing resolves and the output differs everywhere.
+	for _, required := range []string{
+		"../test-project/node_modules/@rbxts/types",
+		"../test-project/node_modules/@typetorch/framework",
+		"../test-project/framework-standin/node_modules/@rbxts/types",
+		"../test-project/framework-standin/src/reflection",
+	} {
+		if _, err := os.Stat(required); err != nil {
+			t.Fatalf("%s is missing: run `bun install` and `bun run test` in the repository root once to set up the fixtures", required)
+		}
+	}
 	for _, c := range fixtureCases {
 		t.Run(c.name, func(t *testing.T) {
-			files, diagnostics := runFixture(t, c)
-			expectedFiles, expectedDiagnostics := readOracle(t, c.name)
-
-			if actualDir != "" {
-				for name, text := range files {
-					target := filepath.Join(actualDir, c.name, name)
-					_ = os.MkdirAll(filepath.Dir(target), 0o755)
-					_ = os.WriteFile(target, []byte(text), 0o644)
-				}
-				_ = os.WriteFile(filepath.Join(actualDir, c.name, "diagnostics.txt"), []byte(diagnostics), 0o644)
-			}
-
-			for name, expected := range expectedFiles {
-				actual, ok := files[name]
-				if !ok {
-					t.Errorf("%s: not transformed", name)
-					continue
-				}
-				if normalize(actual) != applyDivergences(c.name+"/"+name, normalize(expected)) {
-					t.Errorf("%s differs from the TS transformer's output:\n--- TS\n%s\n--- Go\n%s", name, expected, actual)
-				}
-			}
-			for name := range files {
-				if _, ok := expectedFiles[name]; !ok {
-					t.Errorf("%s: transformed, but not by the TS transformer", name)
-				}
-			}
-			if diagnostics != expectedDiagnostics {
-				t.Errorf("diagnostics differ:\n--- TS\n%s--- Go\n%s", expectedDiagnostics, diagnostics)
-			}
+			compareWithOracle(t, c, filepath.Join("testdata", "oracle", c.name))
 		})
 	}
+}
+
+// TestProject compares the Go transformer with the TypeScript one on any roblox-ts project (run testdata/oracle.cjs
+// on it first, on a copy if the project mustn't be touched):
+//
+//	TYPETORCH_PROJECT=<project dir> TYPETORCH_ORACLE=<oracle.cjs output dir> [TYPETORCH_PROJECT_TYPE=package] go test -run TestProject
+func TestProject(t *testing.T) {
+	project, oracle := os.Getenv("TYPETORCH_PROJECT"), os.Getenv("TYPETORCH_ORACLE")
+	if project == "" || oracle == "" {
+		t.Skip("TYPETORCH_PROJECT and TYPETORCH_ORACLE are not set")
+	}
+	compareWithOracle(t, fixtureCase{name: "project", project: project, projectType: os.Getenv("TYPETORCH_PROJECT_TYPE")}, oracle)
 }
 
 // knownDivergences are the differences between TypeScript 5.5 (the oracle) and typescript-go that are expected,
@@ -257,8 +265,14 @@ func applyDivergences(key string, normalized string) string {
 }
 
 // normalize removes formatting differences between TypeScript's and typescript-go's printers: whitespace outside
-// string and template literals (comments are kept, so a missing or moved comment still shows).
+// string and template literals (comments are kept, so a missing or moved comment still shows), line endings, and the
+// parentheses typescript-go's printer puts around a non-null assertion that is accessed or called (`(x!).y`,
+// `(f!)(a)`; TypeScript prints `x!.y`): it ranks `x!` as a unary expression, below member access.
 func normalize(text string) string {
+	return unparenthesizeNonNull(stripWhitespace(strings.ReplaceAll(text, "\r\n", "\n")))
+}
+
+func stripWhitespace(text string) string {
 	var out strings.Builder
 	var quote byte
 	for i := 0; i < len(text); i++ {
@@ -285,21 +299,72 @@ func normalize(text string) string {
 	return out.String()
 }
 
-// automaticTypeDirectiveNames is TypeScript 5's getAutomaticTypeDirectiveNames: every package directory in the type
-// roots, except those whose package.json says `"typings": null`.
-func automaticTypeDirectiveNames(typeRoots []string) []string {
-	var names []string
-	for _, root := range typeRoots {
-		entries, _ := os.ReadDir(root)
-		for _, entry := range entries {
-			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-				continue
+// unparenthesizeNonNull turns `(x!).y`, `(x!)[i]` and `(x!)(a)` into `x!.y`, `x![i]` and `x!(a)` in whitespace-free
+// text. The parentheses' contents are skipped by bracket depth (good enough for test output: brackets inside string
+// literals there are balanced or absent).
+func unparenthesizeNonNull(text string) string {
+	out := []byte(text)
+	for i := 0; i+2 < len(out); i++ {
+		if out[i] != '!' || out[i+1] != ')' || !strings.ContainsRune(".[(", rune(out[i+2])) {
+			continue
+		}
+		depth, open := 0, -1
+		for j := i; j >= 0 && open < 0; j-- {
+			switch out[j] {
+			case ')', ']', '}':
+				depth++
+			case '(', '[', '{':
+				if depth == 0 {
+					open = j
+				}
+				depth--
 			}
-			if text, err := os.ReadFile(filepath.Join(root, entry.Name(), "package.json")); err == nil && strings.Contains(string(text), `"typings": null`) {
-				continue
-			}
-			names = append(names, entry.Name())
+		}
+		// `f(x!)(a)` calls f's result: the parentheses are a call's, not grouping.
+		if open < 0 || out[open] != '(' || isCallee(out[:open]) {
+			continue
+		}
+		out = append(append(append([]byte{}, out[:open]...), out[open+1:i+1]...), out[i+2:]...)
+		i -= 2
+	}
+	return string(out)
+}
+
+func TestUnparenthesizeNonNull(t *testing.T) {
+	for input, expected := range map[string]string{
+		"constt=(this.animator!).Load(a);": "constt=this.animator!.Load(a);",
+		"(s.at!)[i]=0;":                    "s.at![i]=0;",
+		"return(node.check!)(board);":      "returnnode.check!(board);",
+		"((taskasT)[name]!)(task);":        "(taskasT)[name]!(task);",
+		"d=(Dep<T>(\"a\")!).x;":            "d=Dep<T>(\"a\")!.x;",
+		"f(x!).y;":                         "f(x!).y;",
+		"a[0](x!)(b);":                     "a[0](x!)(b);",
+		"(x!);":                            "(x!);",
+	} {
+		if actual := unparenthesizeNonNull(input); actual != expected {
+			t.Errorf("unparenthesizeNonNull(%q) = %q, want %q", input, actual, expected)
 		}
 	}
-	return names
+}
+
+// isCallee reports whether text (whitespace-free) ends with an expression that parentheses after it would call.
+func isCallee(text []byte) bool {
+	isWordByte := func(c byte) bool {
+		return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	}
+	end := len(text)
+	start := end
+	for start > 0 && isWordByte(text[start-1]) {
+		start--
+	}
+	if start < end {
+		// The spaces after keywords are gone: `return(x!).y` is `return (x!).y`.
+		for _, keyword := range []string{"return", "typeof", "void", "await", "yield", "throw", "delete", "case", "in", "of", "else", "do"} {
+			if strings.HasSuffix(string(text[start:end]), keyword) {
+				return false
+			}
+		}
+		return true
+	}
+	return end > 0 && (text[end-1] == ')' || text[end-1] == ']')
 }
