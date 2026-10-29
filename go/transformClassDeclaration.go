@@ -3,7 +3,7 @@
 package transformer
 
 import (
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // decoratorMarker is the property that marks a decorator made with `Modding.createDecorator` /
@@ -352,8 +352,21 @@ func addSectionComment(state *TransformState, node *ts.Node, declaration *ts.Nod
 	ts.AddSyntheticLeadingComment(state.f.ec, node, ts.KindSingleLineCommentTrivia, " (TypeTorch) "+elementName+" "+label)
 }
 
+// NodeBuilderFlags pkg/goblox doesn't re-export yet (REQUESTS.md): typescript-go's nodebuilder.FlagsInTypeAlias and
+// FlagsIgnoreErrors.
+const (
+	nodeBuilderFlagsInTypeAlias  ts.NodeBuilderFlags = 1 << 23
+	nodeBuilderFlagsIgnoreErrors ts.NodeBuilderFlags = 1<<15 | 1<<16 | 1<<17 | 1<<18 | 1<<19 | 1<<21 | 1<<26
+)
+
 func formatType(state *TransformState, t *ts.Type) string {
-	return ts.FormatType(state.typeChecker, t)
+	typeNode := state.typeChecker.TypeToTypeNode(t, nil, nodeBuilderFlagsInTypeAlias|nodeBuilderFlagsIgnoreErrors, nil)
+	if typeNode == nil {
+		return state.typeChecker.TypeToString(t)
+	}
+
+	printer := ts.NewPrinter(ts.PrinterOptions{}, ts.NewEmitContext())
+	return printer.Emit(typeNode, nil)
 }
 
 func getAssignabilityDiagnostics(state *TransformState, node *ts.Node, sourceType *ts.Type, constraintType *ts.Type, trace *ts.Node) *ts.Diagnostic {

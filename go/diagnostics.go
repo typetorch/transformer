@@ -9,7 +9,7 @@ package transformer
 import (
 	"strings"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // diagnosticSource is what the TypeScript transformer puts in `code`.

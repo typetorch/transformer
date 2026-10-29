@@ -3,7 +3,7 @@
 package transformer
 
 import (
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 func transformFile(state *TransformState, file *ts.SourceFile) *ts.SourceFile {

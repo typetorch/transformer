@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"math"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 type factory struct {

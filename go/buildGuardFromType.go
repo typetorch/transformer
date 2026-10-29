@@ -3,7 +3,7 @@
 package transformer
 
 import (
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // buildGuardsFromType converts a type into a list of property guards (`isInterfaceType` omits unknown fields).

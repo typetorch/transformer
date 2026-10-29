@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // supportedNetworkTypes is what a network leaf's parameters may be (shown with every network guard error): what the

@@ -3,7 +3,7 @@
 package transformer
 
 import (
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 var statementTransformers = map[ts.Kind]func(state *TransformState, node *ts.Node) []*ts.Node{}

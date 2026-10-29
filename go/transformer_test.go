@@ -2,6 +2,8 @@ package transformer
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // fixed mirrors FIXED in testdata/oracle.cjs.
@@ -94,29 +96,79 @@ func runFixture(t *testing.T, c fixtureCase) (map[string]string, string) {
 			t.Fatalf("%s is missing: run `bun install` and `bun run test` in the repository root once to set up the fixtures", required)
 		}
 	}
-	project, err := ts.LoadProject(directory)
-	if err != nil {
-		t.Fatal(err)
+	directory = ts.NormalizePath(directory)
+	program, errs := ts.LoadProgram(ts.LoadOptions{Project: directory, CurrentDirectory: directory, Checkers: 1})
+	if program == nil {
+		t.Fatalf("LoadProgram: %v", errs)
 	}
 
-	config := Config{}
-	for _, entry := range project.PluginEntries() {
-		if entry["transform"] != nil {
-			config = ConfigFromPluginEntry(entry)
-			break
-		}
+	config, ok := ConfigFromProgram(program)
+	if !ok {
+		t.Fatalf("%s: no %s plugin entry", directory, Name)
 	}
 	config.Hooks = fixedHooks(c.env)
 
-	results, diagnostics := project.Transform(New(config), c.projectType)
-	rootDir := project.Program.Options().RootDir
-	files := map[string]string{}
-	for _, result := range results {
-		files[relativePath(rootDir, result.File.FileName())] = result.Print()
+	// The fixtures don't list `types`: TypeScript 5 then includes every package of the type roots (@rbxts/types,
+	// @rbxts/compiler-types), TypeScript 7 none. Until goblox's LoadProgram does what TypeScript 5 did (REQUESTS.md),
+	// load the fixture through a tsconfig that extends it and lists them.
+	if program.Options().Types == nil {
+		tsconfig := filepath.Join(t.TempDir(), "tsconfig.json")
+		types, _ := json.Marshal(automaticTypeDirectiveNames(program.Options().TypeRoots))
+		text := fmt.Sprintf(`{ "extends": %q, "compilerOptions": { "types": %s } }`, directory+"/tsconfig.json", types)
+		if err := os.WriteFile(tsconfig, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		program, errs = ts.LoadProgram(ts.LoadOptions{Project: tsconfig, CurrentDirectory: directory, Checkers: 1})
+		if program == nil {
+			t.Fatalf("LoadProgram: %v", errs)
+		}
 	}
+
+	// Every source file under rootDir, like the oracle (and roblox-ts).
+	rootDir := program.Options().RootDir
+	var sourceFiles []*ts.SourceFile
+	for _, file := range ts.CompilableSourceFiles(program) {
+		if strings.HasPrefix(file.FileName(), rootDir+"/") {
+			sourceFiles = append(sourceFiles, file)
+		}
+	}
+
+	ctx := context.Background()
+	result := ts.RunPlugins(ctx, program, []ts.Plugin{New(config)}, ts.PluginOptions{
+		CurrentDirectory: directory,
+		ProjectType:      c.projectType,
+		Files:            sourceFiles,
+	})
+
+	files := map[string]string{}
+	for _, file := range sourceFiles {
+		text, ok := result.Transformed[file.FileName()]
+		if !ok {
+			// Unchanged: the oracle prints these too.
+			text = ts.NewPrinter(ts.PrinterOptions{}, ts.NewEmitContext()).EmitSourceFile(file)
+		}
+		files[relativePath(rootDir, file.FileName())] = text
+	}
+
+	// What the transformer emits is type-checked again (roblox-ts compiles the re-parsed program).
+	for name := range result.Transformed {
+		file := result.Program.GetSourceFile(name)
+		var errors []*ts.Diagnostic
+		for _, diagnostic := range ts.GetPreEmitDiagnostics(ctx, result.Program, file) {
+			if diagnostic.Category() == ts.CategoryError {
+				errors = append(errors, diagnostic)
+			}
+		}
+		if len(errors) > 0 {
+			var text strings.Builder
+			ts.WriteDiagnostics(&text, errors, directory)
+			t.Errorf("%s: the transformed file has type errors:\n%s\n--- transformed\n%s", name, text.String(), result.Transformed[name])
+		}
+	}
+
 	var text strings.Builder
-	for _, diagnostic := range diagnostics {
-		text.WriteString(formatDiagnostic(project.Directory, diagnostic, ""))
+	for _, diagnostic := range result.Diagnostics {
+		text.WriteString(formatDiagnostic(directory, diagnostic, ""))
 	}
 	return files, text.String()
 }
@@ -231,4 +283,23 @@ func normalize(text string) string {
 		}
 	}
 	return out.String()
+}
+
+// automaticTypeDirectiveNames is TypeScript 5's getAutomaticTypeDirectiveNames: every package directory in the type
+// roots, except those whose package.json says `"typings": null`.
+func automaticTypeDirectiveNames(typeRoots []string) []string {
+	var names []string
+	for _, root := range typeRoots {
+		entries, _ := os.ReadDir(root)
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			if text, err := os.ReadFile(filepath.Join(root, entry.Name(), "package.json")); err == nil && strings.Contains(string(text), `"typings": null`) {
+				continue
+			}
+			names = append(names, entry.Name())
+		}
+	}
+	return names
 }

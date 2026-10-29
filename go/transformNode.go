@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // transformNode returns a node, or a SyntaxList of statements where TypeScript returns an array.

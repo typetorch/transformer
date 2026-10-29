@@ -9,9 +9,12 @@
 package transformer
 
 import (
+	"context"
 	"sync"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // Name is the plugin's package name, as in a tsconfig plugin entry (`{ "transform": "@typetorch/transformer" }`).
@@ -54,7 +57,7 @@ func (p *plugin) TransformSourceFile(ctx *ts.TransformContext, file *ts.SourceFi
 		if originalFile := state.parseTreeNode(file.AsNode()); originalFile != nil {
 			hasError := false
 			var preEmitDiagnostics []*ts.Diagnostic
-			for _, diagnostic := range ts.GetPreEmitDiagnostics(ctx.Program, originalFile.AsSourceFile()) {
+			for _, diagnostic := range ts.GetPreEmitDiagnostics(context.Background(), ctx.Program, originalFile.AsSourceFile()) {
 				preEmitDiagnostics = append(preEmitDiagnostics, diagnostic)
 				hasError = hasError || diagnostic.Category() == ts.CategoryError
 			}
@@ -73,6 +76,31 @@ func (p *plugin) TransformSourceFile(ctx *ts.TransformContext, file *ts.SourceFi
 	}
 
 	return transformFile(state, file)
+}
+
+// ConfigFromProgram reads the options of the `{ "transform": "@typetorch/transformer" }` entry in the program's
+// tsconfig `compilerOptions.plugins` (false when there is none). Only the tsconfig itself is read, not the configs it
+// extends: pkg/goblox doesn't expose the merged plugin entries yet (REQUESTS.md).
+func ConfigFromProgram(program *ts.Program) (Config, bool) {
+	// typescript-go's ordered JSON objects marshal with its own options (internal/json).
+	data, err := json.Marshal(program.CommandLine().Raw, jsontext.AllowInvalidUTF8(true))
+	if err != nil {
+		return Config{}, false
+	}
+	var raw struct {
+		CompilerOptions struct {
+			Plugins []map[string]any `json:"plugins"`
+		} `json:"compilerOptions"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return Config{}, false
+	}
+	for _, entry := range raw.CompilerOptions.Plugins {
+		if entry["transform"] == Name {
+			return ConfigFromPluginEntry(entry), true
+		}
+	}
+	return Config{}, false
 }
 
 // ConfigFromPluginEntry reads the options of a tsconfig plugin entry (`{ "transform": ..., ...options }`), already

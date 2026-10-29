@@ -3,7 +3,7 @@
 package transformer
 
 import (
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 func transformStatementList(state *TransformState, statements []*ts.Node) []*ts.Node {

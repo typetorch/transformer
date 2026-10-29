@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // DefaultRuntimeModule is the package generated code imports the runtime (`Reflect`, and `t` as a fallback) from.

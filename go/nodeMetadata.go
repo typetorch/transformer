@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // nodeMetadata is what a node asks for with `@metadata` JSDoc tags, on itself, on its decorators' declarations, or

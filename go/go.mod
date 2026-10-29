@@ -2,13 +2,14 @@ module github.com/typetorch/transformer/go
 
 go 1.26
 
-require github.com/microsoft/typescript-go/gobloxshim v0.0.0
+require (
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
+	github.com/microsoft/typescript-go v0.0.0
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/microsoft/typescript-go v0.0.0 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
@@ -16,6 +17,3 @@ require (
 )
 
 replace github.com/microsoft/typescript-go => ../../goblox-ts
-
-// Stand-in for goblox-ts' pkg/goblox until it lands (see README.md).
-replace github.com/microsoft/typescript-go/gobloxshim => ./gobloxshim

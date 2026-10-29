@@ -18,7 +18,7 @@ import (
 	"regexp"
 	"strings"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 type macroName string

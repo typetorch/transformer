@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
-	ts "github.com/microsoft/typescript-go/gobloxshim"
+	ts "github.com/microsoft/typescript-go/pkg/goblox"
 )
 
 // networkContext is where a macro value sits in a `@metadata macro network` call (createNetwork,
