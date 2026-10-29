@@ -125,7 +125,7 @@ func (m *nodeMetadata) parse(state *TransformState, node *ts.Node) {
 		name, ok := ts.GetPropertyNameForPropertyNameNode(node.Name())
 		if ok && node.Parent != nil && ts.IsClassLike(node.Parent) {
 			for _, implement := range ts.GetEffectiveImplementsTypeNodes(node.Parent) {
-				symbol := state.getSymbol(implement.Expression())
+				symbol := state.getSymbol(heritageExpression(implement))
 				if symbol == nil || symbol.Members == nil {
 					continue
 				}
@@ -139,7 +139,7 @@ func (m *nodeMetadata) parse(state *TransformState, node *ts.Node) {
 	} else if ts.IsClassLike(node) {
 		// Interfaces are able to request metadata for the object it is implemented on.
 		for _, implement := range ts.GetEffectiveImplementsTypeNodes(node) {
-			symbol := state.getSymbol(implement.Expression())
+			symbol := state.getSymbol(heritageExpression(implement))
 			if symbol != nil && len(symbol.Declarations) > 0 {
 				m.parse(state, symbol.Declarations[0])
 			}
@@ -181,4 +181,13 @@ func getJSDocTags(node *ts.Node) []*ts.Node {
 
 func isJSDocLinkLike(node *ts.Node) bool {
 	return node.Kind == ts.KindJSDocLink || node.Kind == ts.KindJSDocLinkCode || node.Kind == ts.KindJSDocLinkPlain
+}
+
+// heritageExpression is TypeScript's `implement.expression` for an `implements` clause element. typescript-go parses
+// class `implements` (and interface `extends`) elements as type references, not ExpressionWithTypeArguments.
+func heritageExpression(element *ts.Node) *ts.Node {
+	if element.Kind == ts.KindTypeReference {
+		return element.AsTypeReferenceNode().TypeName
+	}
+	return element.Expression()
 }
