@@ -57,9 +57,36 @@ func LoadProject(directory string) (*Project, error) {
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("%s: %s", configFileName, errs[0].String())
 	}
+	// TypeScript 7 defaults `types` to []; roblox-ts projects rely on TypeScript 5 including every package in
+	// `typeRoots` (@rbxts/types, @rbxts/compiler-types).
+	if options := config.CompilerOptions(); options.Types == nil {
+		cliOptions := &core.CompilerOptions{Types: automaticTypeDirectiveNames(h.fs, options.TypeRoots)}
+		config, errs = tsoptions.GetParsedCommandLineOfConfigFile(configFileName, cliOptions, nil, h, extendedConfigCache)
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("%s: %s", configFileName, errs[0].String())
+		}
+	}
 	compilerHost := compiler.NewCachedFSCompilerHost(directory, h.fs, bundled.LibPath(), extendedConfigCache, nil, nil)
 	program := compiler.NewProgram(compiler.ProgramOptions{Config: config, Host: compilerHost, SingleThreaded: core.TSTrue})
 	return &Project{Directory: directory, Config: config, Program: program}, nil
+}
+
+// automaticTypeDirectiveNames is TypeScript 5's getAutomaticTypeDirectiveNames: every package directory in the type
+// roots, except those whose package.json says `"typings": null`.
+func automaticTypeDirectiveNames(fs vfs.FS, typeRoots []string) []string {
+	var names []string
+	for _, root := range typeRoots {
+		for _, directory := range fs.GetAccessibleEntries(root).Directories {
+			if strings.HasPrefix(directory, ".") {
+				continue
+			}
+			if text, ok := fs.ReadFile(tspath.CombinePaths(root, directory, "package.json")); ok && strings.Contains(text, `"typings": null`) {
+				continue
+			}
+			names = append(names, directory)
+		}
+	}
+	return names
 }
 
 // PluginEntries are the `compilerOptions.plugins` entries of the tsconfig (typescript-go parses them but keeps
