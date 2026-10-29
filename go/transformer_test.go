@@ -1,6 +1,7 @@
 package transformer
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,6 +82,18 @@ func runFixture(t *testing.T, c fixtureCase) (map[string]string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fixtures need their packages (@rbxts types, the packed stand-in @typetorch/framework, the runtime kit
+	// copied into the stand-in): without them nothing resolves and the output differs everywhere.
+	for _, required := range []string{
+		"../test-project/node_modules/@rbxts/types",
+		"../test-project/node_modules/@typetorch/framework",
+		"../test-project/framework-standin/node_modules/@rbxts/types",
+		"../test-project/framework-standin/src/reflection",
+	} {
+		if _, err := os.Stat(required); err != nil {
+			t.Fatalf("%s is missing: run `bun install` and `bun run test` in the repository root once to set up the fixtures", required)
+		}
+	}
 	project, err := ts.LoadProject(directory)
 	if err != nil {
 		t.Fatal(err)
@@ -121,6 +134,8 @@ func readOracle(t *testing.T, name string) (map[string]string, string) {
 		if err != nil {
 			return err
 		}
+		// Git may check the oracle out with CRLF line endings (core.autocrlf on Windows); TypeScript printed LF.
+		text = bytes.ReplaceAll(text, []byte("\r\n"), []byte("\n"))
 		relative, _ := filepath.Rel(root, path)
 		if relative == "diagnostics.txt" {
 			diagnostics = string(text)

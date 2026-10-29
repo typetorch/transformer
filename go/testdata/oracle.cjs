@@ -91,7 +91,7 @@ function formatDiagnostic(diagnostic, indent) {
 	let where = "";
 	if (diagnostic.file) {
 		const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-		where = `${path.relative(projectDir, diagnostic.file.fileName)}:${line + 1}:${character + 1}+${diagnostic.length}: `;
+		where = `${path.relative(projectDir, diagnostic.file.fileName).split(path.sep).join("/")}:${line + 1}:${character + 1}+${diagnostic.length}: `;
 	}
 	const text = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
 	let out = `${indent}${where}${category}: ${text}\n`;
