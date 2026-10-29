@@ -1,0 +1,2 @@
+# Go sources and the oracle stay LF on Windows checkouts too (gofmt, byte-exact oracle output).
+* text eol=lf
