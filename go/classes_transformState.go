@@ -137,6 +137,9 @@ type TransformState struct {
 	// debugMacros is whether the debug macros emit (see TransformerConfig.DebugMacros).
 	debugMacros bool
 
+	// macroCandidates is what collectMacroCandidates returned for the program.
+	macroCandidates map[string]bool
+
 	isUserMacroCache map[*ts.Symbol]bool
 	// macroCache maps a symbol to the built-in macro it declares ("": none).
 	macroCache map[*ts.Symbol]macroName
@@ -187,6 +190,7 @@ func newTransformState(program *ts.Program, context *ts.TransformContext, config
 		state.rootDirs = []string{state.srcDir}
 	}
 	state.setContext(context)
+	state.macroCandidates = collectMacroCandidates(program)
 
 	pkg := getPackageJson(state.currentDirectory)
 	assert(pkg.result.Name != "", "package.json in "+pkg.directory+" has no name")
