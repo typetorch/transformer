@@ -43,5 +43,24 @@ func transformFile(state *TransformState, file *ts.SourceFile) *ts.SourceFile {
 		state.addDiagnostic(diag)
 	}
 
+	// A file nothing changed in is returned as is, so goblox neither reprints nor reparses it, and keeps its binding
+	// and types (TypeScript's updateSourceFile also returns the node itself when nothing changed).
+	if sameNodes(statements, file.Statements.Nodes) {
+		return file
+	}
+
 	return f.nf.UpdateSourceFile(file, f.list(statements), file.EndOfFileToken).AsSourceFile()
+}
+
+// sameNodes is whether a and b hold the same nodes, in the same order.
+func sameNodes(a, b []*ts.Node) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
