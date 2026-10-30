@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	ts "github.com/microsoft/typescript-go/pkg/goblox"
@@ -75,6 +76,15 @@ type Optimizations struct {
 	GuardGenerationDedupLimit *int `json:"guardGenerationDedupLimit,omitempty"`
 }
 
+// semanticDiagnostics is whether each file is semantically checked before it is transformed. The deprecated
+// `noSemanticDiagnostics: false` used to mean "check"; keep honoring it when set explicitly.
+func (c TransformerConfig) semanticDiagnostics() bool {
+	if c.SemanticDiagnostics != nil {
+		return *c.SemanticDiagnostics
+	}
+	return c.NoSemanticDiagnostics != nil && !*c.NoSemanticDiagnostics
+}
+
 // Hooks replace what the TypeScript transformer reads from the process. Nil fields use the real thing.
 type Hooks struct {
 	Getenv func(key string) string
@@ -108,7 +118,18 @@ type importInfo struct {
 	entries []importItem
 }
 
-// TransformState is the per-compile state of the transformer.
+// programState is what the TransformStates of a program share, one for each checker running at the same time.
+type programState struct {
+	macroCandidatesOnce sync.Once
+	macroCandidates     map[string]bool
+
+	gitInfoOnce sync.Once
+	gitInfo     GitInfo
+
+	debugMacrosLogOnce sync.Once
+}
+
+// TransformState is the per-compile state of the transformer, one for each checker.
 type TransformState struct {
 	parsedCommandLine commandLine
 	currentDirectory  string
@@ -140,12 +161,13 @@ type TransformState struct {
 	// macroCandidates is what collectMacroCandidates returned for the program.
 	macroCandidates map[string]bool
 
+	shared *programState
+
 	isUserMacroCache map[*ts.Symbol]bool
 	// macroCache maps a symbol to the built-in macro it declares ("": none).
 	macroCache map[*ts.Symbol]macroName
 	// macroFileCache maps a file name to whether the file declares built-in macros.
 	macroFileCache    map[string]bool
-	gitInfo           *GitInfo
 	packageJsonFields *jsonObject
 	guardLibraryPath  string
 	resolver          *ts.ModuleResolver
@@ -162,7 +184,7 @@ type TransformState struct {
 	prereqStack [][]*ts.Node
 }
 
-func newTransformState(program *ts.Program, context *ts.TransformContext, config TransformerConfig) *TransformState {
+func newTransformState(program *ts.Program, context *ts.TransformContext, config TransformerConfig, shared *programState) *TransformState {
 	tsconfigPath := path.Join(context.CurrentDirectory, "tsconfig.json")
 	state := &TransformState{
 		parsedCommandLine: commandLine{tsconfigPath: tsconfigPath, project: context.CurrentDirectory, projectType: context.ProjectType},
@@ -170,6 +192,7 @@ func newTransformState(program *ts.Program, context *ts.TransformContext, config
 		options:           program.Options(),
 		program:           program,
 		config:            config,
+		shared:            shared,
 		isUserMacroCache:  map[*ts.Symbol]bool{},
 		macroCache:        map[*ts.Symbol]macroName{},
 		macroFileCache:    map[string]bool{},
@@ -190,7 +213,8 @@ func newTransformState(program *ts.Program, context *ts.TransformContext, config
 		state.rootDirs = []string{state.srcDir}
 	}
 	state.setContext(context)
-	state.macroCandidates = collectMacroCandidates(program)
+	shared.macroCandidatesOnce.Do(func() { shared.macroCandidates = collectMacroCandidates(program) })
+	state.macroCandidates = shared.macroCandidates
 
 	pkg := getPackageJson(state.currentDirectory)
 	assert(pkg.result.Name != "", "package.json in "+pkg.directory+" has no name")
@@ -210,15 +234,12 @@ func newTransformState(program *ts.Program, context *ts.TransformContext, config
 		state.runtimeModule = DefaultRuntimeModule
 	}
 	state.isRuntimePackage = state.packageName == state.runtimeModule
-	// The deprecated `noSemanticDiagnostics: false` used to mean "check"; keep honoring it when set explicitly.
-	if config.SemanticDiagnostics != nil {
-		state.semanticDiagnostics = *config.SemanticDiagnostics
-	} else {
-		state.semanticDiagnostics = config.NoSemanticDiagnostics != nil && !*config.NoSemanticDiagnostics
-	}
+	state.semanticDiagnostics = config.semanticDiagnostics()
 	state.debugMacros = (config.DebugMacros == nil || *config.DebugMacros) && config.Hooks.getenv("TYPETORCH_DEBUG_MACROS") != "0"
 	if state.logger.verbose && !state.debugMacros {
-		state.logger.writeLine("debug macros off: $print/$warn/$dbg compile to nothing, $assert/$error without the source position")
+		shared.debugMacrosLogOnce.Do(func() {
+			state.logger.writeLine("debug macros off: $print/$warn/$dbg compile to nothing, $assert/$error without the source position")
+		})
 	}
 	return state
 }
@@ -242,15 +263,14 @@ func (s *TransformState) moduleResolver() *ts.ModuleResolver {
 
 // getGitInfo is the project's git state, read once per compile (so watch mode sees new commits).
 func (s *TransformState) getGitInfo() GitInfo {
-	if s.gitInfo == nil {
+	s.shared.gitInfoOnce.Do(func() {
 		git := gitRunner(runGit)
 		if s.config.Hooks.Git != nil {
 			git = s.config.Hooks.Git
 		}
-		info := readGitInfo(s.rootDirectory, git, s.config.Hooks.now())
-		s.gitInfo = &info
-	}
-	return *s.gitInfo
+		s.shared.gitInfo = readGitInfo(s.rootDirectory, git, s.config.Hooks.now())
+	})
+	return s.shared.gitInfo
 }
 
 // getPackageJson is the project's package.json, every field (for `$package`).
