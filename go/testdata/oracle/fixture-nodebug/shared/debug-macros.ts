@@ -4,7 +4,7 @@ import type { GitInfo } from "@typetorch/transformer/macros";
 export function debugMacros(value: number) {
     if (value > 100) { }
     const git: Pick<GitInfo, "Branch" | "Commit"> = { "Branch": "main", "Commit": "0123456" };
-    const full = { "Branch": "main", "Commit": "0123456", "CommitHash": "0123456789abcdef0123456789abcdef01234567", "LatestTag": "v1.2.3", "ISODate": "2026-01-02T03:04:05.000Z", "Timestamp": 1767323045 };
+    const full = { "Branch": "main", "Commit": "0123456", "CommitHash": "0123456789abcdef0123456789abcdef01234567", "LatestTag": "v1.2.3", "ISODate": "2026-03-04T05:06:07.890Z", "Timestamp": 1767323045 };
     const built = 1772600767;
     const iso = "2026-03-04T05:06:07.890Z";
     const doubled = value * 2;

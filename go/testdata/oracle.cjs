@@ -36,6 +36,8 @@ childProcess.execFileSync = function (file, args, options) {
 	if (file !== "git") return realExecFileSync.apply(this, arguments);
 	const command = args.join(" ");
 	if (command.startsWith("log -1")) return `${FIXED.commit}\n${FIXED.authorDate}\n${FIXED.authorTimestamp}\n`;
+	// No such file: the commit counts as packed, so ISODate is the pinned clock.
+	if (command.startsWith("rev-parse --git-path objects/")) return `.git/${args[2]}\n`;
 	if (command === "rev-parse --abbrev-ref HEAD") return `${FIXED.branch}\n`;
 	if (command === "describe --tags --abbrev=0") return `${FIXED.tag}\n`;
 	throw new Error(`unexpected git call: ${command}`);

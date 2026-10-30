@@ -13,7 +13,8 @@
  * Local packages are unpacked into node_modules by hand: Bun can't install `file:` folders on this machine (EPERM),
  * and it caches `file:` tarballs by name, so a rebuilt tarball would never be picked up.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, statSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, cpSync, statSync } from "fs";
+import { tmpdir } from "os";
 import { join, relative, resolve } from "path";
 
 const fixture = resolve(import.meta.dir, "..");
@@ -278,6 +279,29 @@ check("$print carries the source position", debugOn.includes('print("[src/shared
 check("$warn carries the source position", debugOn.includes('warn("[src/shared/debug-macros.ts:7]", "warn", value)'), excerpt(debugOn, /warn\("\[/));
 check("$git(\"Branch\", \"Commit\") is an object literal with those fields", /local git = \{\s*Branch = "[^"]*",\s*Commit = "[0-9a-f]{0,7}",?\s*\}/.test(debugOn), excerpt(debugOn, /local git = /, 4));
 check("$git() has every field", /Timestamp = \d+/.test(debugOn) && /CommitHash = "[0-9a-f]{0,40}"/.test(debugOn) && /ISODate = "/.test(debugOn), excerpt(debugOn, /local full = /, 8));
+{
+	// ISODate on a real repository, as git-repo-info in rbxts-transform-debug: the author date while the commit's object
+	// is loose, and the compile time once it is packed.
+	const { readGitInfo } = require(join(root, "out", "util", "functions", "gitInfo.js"));
+	const repository = mkdtempSync(join(tmpdir(), "typetorch-git-"));
+	const git = (...args: string[]) =>
+		Bun.spawnSync(["git", "-c", "user.name=a", "-c", "user.email=a@example.com", "-c", "commit.gpgsign=false", "-c", "gc.auto=0", ...args], {
+			cwd: repository,
+			env: { ...process.env, GIT_AUTHOR_DATE: "2026-01-02T06:04:05+03:00", GIT_COMMITTER_DATE: "2026-01-09T06:04:05+03:00" },
+		});
+	git("init", "-q");
+	git("commit", "-q", "--allow-empty", "-m", "first");
+	const loose = readGitInfo(repository);
+	git("gc", "-q");
+	const packed = readGitInfo(repository);
+	rmSync(repository, { recursive: true, force: true });
+	check("$git().ISODate is the author date for a loose commit", loose.isoDate === "2026-01-02T03:04:05.000Z", loose.isoDate);
+	check("$git().ISODate is the compile time for a packed commit", packed.isoDate !== loose.isoDate && Math.abs(Date.parse(packed.isoDate) - Date.now()) < 60_000, packed.isoDate);
+	check("$git().Timestamp is the author date either way", loose.timestamp === 1767323045 && packed.timestamp === 1767323045, `${loose.timestamp} ${packed.timestamp}`);
+}
+const exportEquals = read(join(out, "shared", "export-equals.luau"));
+check("a macro from a module with `export =` next to types expands", exportEquals.includes('print("[src/shared/export-equals.ts:10]", "print", value)'), excerpt(exportEquals, /print\(/));
+check("a dependency from such a module gets the id of its class", exportEquals.includes('"shared/export-equals-service@EqualsService"'), excerpt(exportEquals, /typetorch:parameters/));
 check("$compileTime() is a number, $compileTime(\"ISO-8601\") a string", /local built = \d{10}\b/.test(debugOn) && /local iso = "\d{4}-\d\d-\d\dT/.test(debugOn), excerpt(debugOn, /local built = /, 2));
 check("$dbg(x) as an expression prints the text and value and yields the value", /local doubled = \(function\(\)[\s\S]*print\("\[src\/shared\/debug-macros\.ts:13\] value \* 2 =", value[\s\S]*return value/.test(debugOn), excerpt(debugOn, /local doubled = /, 5));
 check("$dbg(x) as a statement prints", debugOn.includes('print("[src/shared/debug-macros.ts:14] doubled =", doubled)'), excerpt(debugOn, /doubled =", doubled/));

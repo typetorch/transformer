@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +36,9 @@ func fixedHooks(env map[string]string) Hooks {
 			switch command := strings.Join(args, " "); {
 			case strings.HasPrefix(command, "log -1"):
 				return fixed.commit + "\n" + fixed.authorDate + "\n" + fixed.authorTimestamp, true
+			case strings.HasPrefix(command, "rev-parse --git-path objects/"):
+				// No such file: the commit counts as packed, so ISODate is the pinned clock.
+				return ".git/" + args[2], true
 			case command == "rev-parse --abbrev-ref HEAD":
 				return fixed.branch, true
 			case command == "describe --tags --abbrev=0":
@@ -367,4 +371,48 @@ func isCallee(text []byte) bool {
 		return true
 	}
 	return end > 0 && (text[end-1] == ')' || text[end-1] == ']')
+}
+
+// ISODate on a real repository, the same as git-repo-info in rbxts-transform-debug: the author date while the commit's
+// object is loose, and the compile time once it is packed. Timestamp stays on the commit.
+func TestGitInfoLooseAndPacked(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	directory := t.TempDir()
+	subdirectory := filepath.Join(directory, "packages", "game")
+	if err := os.MkdirAll(subdirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "file.txt"), []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-c", "user.name=a", "-c", "user.email=a@example.com", "-c", "commit.gpgsign=false", "-c", "gc.auto=0"}, args...)...)
+		command.Dir = directory
+		command.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2026-01-02T06:04:05+03:00", "GIT_COMMITTER_DATE=2026-01-09T06:04:05+03:00")
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	mustGit("init", "-q")
+	mustGit("add", ".")
+	mustGit("commit", "-q", "-m", "first")
+	linked := filepath.Join(directory, "linked")
+	mustGit("worktree", "add", "-q", "--detach", linked)
+
+	const authorDate, authorTimestamp = "2026-01-02T03:04:05.000Z", 1767323045
+	check := func(state string, isoDate string) {
+		t.Helper()
+		for _, cwd := range []string{directory, subdirectory, linked} {
+			info := readGitInfo(cwd, runGit, fixed.now)
+			if info.ISODate != isoDate || info.Timestamp != authorTimestamp {
+				t.Errorf("%s, in %s: ISODate %s, Timestamp %v; want %s, %v", state, cwd, info.ISODate, info.Timestamp, isoDate, authorTimestamp)
+			}
+		}
+	}
+	check("loose", authorDate)
+	mustGit("gc", "-q")
+	check("packed", toISOString(fixed.now))
 }

@@ -72,7 +72,10 @@ export interface GitInfo {
 	readonly CommitHash: string;
 	/** The latest tag reachable from the commit ("" without one). */
 	readonly LatestTag: string;
-	/** The commit's author date (ISO 8601). */
+	/**
+	 * The commit's author date (ISO 8601) while the commit's object is loose. Once it is packed (a fresh clone, or after
+	 * `git gc`) this is the compile time, as with rbxts-transform-debug. `Timestamp` is always the author date.
+	 */
 	readonly ISODate: string;
 	/** The commit's author date as a unix timestamp (seconds). */
 	readonly Timestamp: number;

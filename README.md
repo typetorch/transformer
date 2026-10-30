@@ -206,7 +206,7 @@ carried over: `$dbg`'s custom handler and `$keysof` (unimplemented upstream).
 | `$nameof<T>()`, `$nameof(a.b)` | `"T"`, `"b"` (an identifier, a property name, a string, or `this` inside a class) |
 | `$file.filePath`, `$file.lineNumber`, `$file` | the file's path relative to the project (forward slashes), the line, or both as an object |
 | `$package.version`, `$package` | a field of the project's `package.json` as a literal, or the whole file |
-| `$git()`, `$git("Branch", "Commit")` | an object literal: `Branch`, `Commit` (7 characters), `CommitHash`, `LatestTag`, `ISODate` and `Timestamp` (author date, seconds), or the named fields. Read with the `git` CLI once per compile; `""` without a repository. `$git().Branch` compiles only that field. |
+| `$git()`, `$git("Branch", "Commit")` | an object literal: `Branch`, `Commit` (7 characters), `CommitHash`, `LatestTag`, `ISODate` and `Timestamp` (author date, seconds), or the named fields. `ISODate` is the author date only while the commit's object is loose, and the compile time once it is packed (a fresh clone, `git gc`), as with rbxts-transform-debug. Read with the `git` CLI once per compile; `""` without a repository. `$git().Branch` compiles only that field. |
 | `$compileTime()`, `$compileTime("DateTime" \| "UnixTimestampMillis" \| "ISO-8601")` | the compile time: unix seconds by default, else `DateTime.fromIsoDate("...")!`, milliseconds or an ISO string |
 
 The first five are the debug macros. With `debugMacros: false` in the plugin options, or `TYPETORCH_DEBUG_MACROS=0`
