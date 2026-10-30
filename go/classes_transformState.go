@@ -467,7 +467,7 @@ func (s *TransformState) getSymbolEx(node *ts.Node, followAlias bool) *ts.Symbol
 	symbol := s.typeChecker.GetSymbolAtLocation(node)
 
 	if symbol != nil && followAlias {
-		return s.typeChecker.SkipAlias(symbol)
+		return ts.SkipAliases(s.typeChecker, symbol)
 	}
 	return symbol
 }
