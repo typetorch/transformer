@@ -11,7 +11,8 @@ The roblox-ts transformer behind [TypeTorch](https://github.com/typetorch). It d
    constructor's dependency ids (`typetorch:parameters`) and a `Reflect.decorate` call.
 3. **Debug and build-info macros.** `$print`, `$warn`, `$error`, `$assert`, `$dbg`, `$nameof`, `$file`, `$package`,
    `$git` and `$compileTime` from `@typetorch/transformer/macros`: what `rbxts-transform-debug` did, in this
-   transformer, so a project needs one plugin (and one type check) instead of two. See [Debug macros](#debug-macros).
+   transformer (0.3.2+), so a project needs one plugin (and one type check) instead of two. See
+   [Debug macros](#debug-macros).
 
 It is a stripped-down fork of [rbxts-transformer-flamework](https://github.com/rbxts-flamework/transformer) (MIT), with
 the guard builder and macro engine kept as they are. TypeTorch projects don't depend on Flamework at all: the runtime
@@ -190,8 +191,8 @@ datatypes, Instances by class, arrays, tuples, Maps, Sets, plain objects/interfa
 import { $print, $warn, $error, $assert, $dbg, $nameof, $file, $package, $git, $compileTime } from "@typetorch/transformer/macros";
 ```
 
-The transformer expands every call and drops the import (nothing in `macros.d.ts` exists at runtime), so the module
-never reaches roblox-ts. The names and output are those of
+Transformer 0.3.2 and later. The transformer expands every call and drops the import (nothing in `macros.d.ts`
+exists at runtime), so the module never reaches roblox-ts. The names and output are those of
 [rbxts-transform-debug](https://github.com/roblox-aurora/rbxts-transform-debug) 2.2, which TypeTorch projects used
 before; calls through that package's own declarations are expanded too, so a project can remove the
 `rbxts-transform-debug` plugin from its tsconfig first and rewrite the imports later (then remove the package). Not
@@ -314,12 +315,17 @@ The CLI doesn't configure the transformer; the game's `tsconfig.json` does (abov
 - `typetorch migrate --from flamework` (`tt` works as an alias) flags a tsconfig that still lists
   `rbxts-transformer-flamework` (replace it with `@typetorch/transformer`) or lacks
   `@typetorch/transformer`, and a `package.json` without the TypeTorch packages.
-- `typetorch build` hashes the arguments of every `createNetwork(...)` call in the compiled Luau (the guard trees this
-  transformer generates) into the payload's `ProtocolHash`, and warns about `createNetwork()` calls without generated
-  guards (the transformer missing from the plugins).
+- `typetorch build` hashes the arguments of every `createNetwork(...)` and `createFlameworkCompat(...)` call in the
+  compiled Luau (the guard trees this transformer generates) into the payload's `ProtocolHash`, warns about calls
+  without generated guards (the transformer missing from the plugins), and notes a game still on
+  `createFlameworkCompat`.
 - Prod builds compile with `TYPETORCH_DEBUG_MACROS=0` (and a generated tsconfig whose first plugin strips
   `rbxts-transform-debug`'s macros, for projects still on it); this transformer strips its own debug macros from the
   variable.
+- `typetorch build` (CLI 0.16+) compiles with goblox, a Go port of roblox-ts, when `node_modules/.bin/goblox` is
+  installed (`bun add -d goblox`), or when `TYPETORCH_COMPILER` / typetorch.json `"compiler"` asks for it. goblox runs
+  this transformer natively (a Go port, from the same tsconfig `plugins` entry, `TYPETORCH_DEBUG_MACROS` included) and
+  ignores every other JS plugin. Otherwise it runs `rbxtsc` with this package.
 
 ## Migrating from Flamework
 
@@ -332,12 +338,21 @@ The CLI doesn't configure the transformer; the game's `tsconfig.json` does (abov
 | `"flamework:parameters"`, `"flamework:implements"`, `"flamework:decorators"` keys | `"typetorch:parameters"`, `"typetorch:implements"`, `"typetorch:decorators"` |
 | `Reflect.idToObj` (internal) | `Reflect.idToObj` (public `Map`) or `Reflect.getObjectFromId(id)` |
 | `@metadata macro`, `Modding.Generic/Many/Caller/TupleLabels` | unchanged names, TypeTorch's `Modding` |
+| `import { Dependency } from "@flamework/core"` | `import { Dependency } from "@typetorch/framework"` (from onInit on, not in constructors) |
 | `flamework.build`, `flamework.json`, `include/flamework/` | gone; delete them |
 
-Not carried over: `Flamework.addPaths` / `ignite`, `Dependency<T>()` and the other dependency macros, components and
-attribute guards, networking intrinsics and key obfuscation, `Modding.Hash` / `Obfuscate` / `Intrinsic`, id
-obfuscation modes, `hashPrefix` / `salt`, build-info files, and the `flamework.json` config. Ids changed format
-(`flamework.build` is gone), so data saved with Flamework ids does not carry over.
+`Dependency<T>()` keeps its name and call: it is a user macro of `@typetorch/framework` now (`Modding.Generic<T,
+"id">`, like `TypeTorch.module<T>()` and the field form `Lazy<T>()`), not a transformer intrinsic.
+
+Not carried over: `Flamework.addPaths` / `ignite`, Flamework's other dependency macros (`Flamework.id`,
+`Flamework.createGuard`, `Flamework.implements`; write a user macro instead), components and attribute guards,
+networking intrinsics and key obfuscation, `Modding.Hash` / `Obfuscate` / `Intrinsic`, id obfuscation modes,
+`hashPrefix` / `salt`, build-info files, and the `flamework.json` config. Ids changed format (`flamework.build` is
+gone), so data saved with Flamework ids does not carry over.
+
+`typetorch migrate --from flamework` (CLI) rewrites a Flamework game's imports, modules, ignite files and networking,
+and flags the rest; the docs' [Coming from Flamework](https://github.com/typetorch/docs/blob/main/guides/from-flamework.md)
+guide has the whole mapping.
 
 ## Developing
 
